@@ -33,8 +33,3 @@ Every removal passes `crates/core/src/safety.rs`, which refuses system paths, ho
 standard folders, and `~/Library/*` roots, including when reached through a symlink.
 User files go to the Trash; only regenerable data (caches, build output) is deleted outright.
 Scans never download iCloud placeholders and never touch access times.
-
-## Illustrations
-
-`ui/src/lib/illustrations/vendor/` holds the licensed UI8 "Empty States" pack. See the
-README in that folder before reusing it.
