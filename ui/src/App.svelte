@@ -6,6 +6,7 @@
   import Toasts from "./lib/components/Toasts.svelte";
   import { MODULE, MODULES } from "./lib/modules";
   import { app } from "./lib/state.svelte";
+  import Cleanup from "./modules/Cleanup.svelte";
   import ComingSoon from "./modules/ComingSoon.svelte";
   import SpaceLens from "./modules/SpaceLens.svelte";
   import Tools from "./modules/Tools.svelte";
@@ -38,6 +39,8 @@
       <div class="page">
         {#if app.module === "spacelens"}
           <SpaceLens />
+        {:else if app.module === "cleanup"}
+          <Cleanup />
         {:else if app.module === "tools"}
           <Tools />
         {:else}

@@ -99,7 +99,6 @@ export const MODULES: ModuleDef[] = [
       { icon: Trash, label: "Trash Bins" },
     ],
     theme: theme("#0c2614", "#1d5228", "#3d8a39", "#58a849", "#6fcf5a", "#9be686"),
-    comingIn: "Phase 3",
   },
   {
     id: "performance",

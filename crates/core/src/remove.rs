@@ -2,6 +2,8 @@ use crate::fsutil;
 use crate::safety;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::ErrorKind;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -37,27 +39,100 @@ pub struct RemoveSummary {
     pub bytes_freed: u64,
 }
 
+/// Removes paths after checking them against `safety`. Reuse one per batch.
+pub struct Remover {
+    home: PathBuf,
+    trash: trash::TrashContext,
+}
+
+impl Default for Remover {
+    fn default() -> Self {
+        let mut trash = trash::TrashContext::default();
+        {
+            use trash::macos::{DeleteMethod, TrashContextExtMacos};
+            // Finder's method plays a sound per item and needs Automation permission.
+            trash.set_delete_method(DeleteMethod::NsFileManager);
+        }
+        Self { home: fsutil::home_dir(), trash }
+    }
+}
+
+impl Remover {
+    /// A path that is already gone counts as removed.
+    pub fn remove(&self, path: &Path, mode: RemoveMode) -> Result<(), String> {
+        self.check(path)?;
+        let md = match fs::symlink_metadata(path) {
+            Ok(md) => md,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.to_string()),
+        };
+        match mode {
+            RemoveMode::Trash => self.trash.delete(path).map_err(|e| e.to_string()),
+            RemoveMode::Delete => delete(path, md.is_dir()).or_else(|e| {
+                // Some tools (Go's module cache) mark their folders read-only.
+                if e.kind() == ErrorKind::PermissionDenied && md.is_dir() {
+                    make_dirs_writable(path);
+                    delete(path, true).map_err(|e| e.to_string())
+                } else {
+                    Err(e.to_string())
+                }
+            }),
+        }
+    }
+
+    /// Checks the path as given and with its parent resolved, so /var/db (a symlink to
+    /// /private/var/db) can't sneak past the rules. The item itself may be a symlink we
+    /// mean to remove, so only the parent is resolved.
+    fn check(&self, path: &Path) -> Result<(), String> {
+        let resolved = match (path.parent().map(fs::canonicalize), path.file_name()) {
+            (Some(Ok(parent)), Some(name)) => parent.join(name),
+            _ => path.to_path_buf(),
+        };
+        for p in [path, resolved.as_path()] {
+            if let Some(reason) = safety::protection(p, &self.home) {
+                return Err(format!("Protected: {reason}"));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn delete(path: &Path, is_dir: bool) -> std::io::Result<()> {
+    let result = if is_dir { fs::remove_dir_all(path) } else { fs::remove_file(path) };
+    match result {
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+fn make_dirs_writable(path: &Path) {
+    let Ok(md) = fs::symlink_metadata(path) else { return };
+    if !md.is_dir() {
+        return;
+    }
+    let mut perms = md.permissions();
+    perms.set_mode(perms.mode() | 0o700);
+    let _ = fs::set_permissions(path, perms);
+    if let Ok(rd) = fs::read_dir(path) {
+        for e in rd.flatten() {
+            make_dirs_writable(&e.path());
+        }
+    }
+}
+
 pub fn remove_items(
     items: &[RemoveItem],
     mode: RemoveMode,
     mut on_event: impl FnMut(RemoveEvent),
 ) -> RemoveSummary {
-    let home = fsutil::home_dir();
-    let mut trash = trash::TrashContext::default();
-    {
-        use trash::macos::{DeleteMethod, TrashContextExtMacos};
-        // Finder's method plays a sound per item and needs Automation permission.
-        trash.set_delete_method(DeleteMethod::NsFileManager);
-    }
-
+    let remover = Remover::default();
     let mut summary = RemoveSummary::default();
     for (index, item) in items.iter().enumerate() {
         let path_str = item.path.to_string_lossy().into_owned();
         on_event(RemoveEvent::Started { path: path_str.clone(), index, total: items.len() });
-
-        let result = remove_one(&item.path, item.size, mode, &home, &trash);
-        match result {
-            Ok(bytes) => {
+        let bytes = item.size.unwrap_or_else(|| fsutil::disk_usage(&item.path));
+        match remover.remove(&item.path, mode) {
+            Ok(()) => {
                 summary.bytes_freed += bytes;
                 summary.removed.push((path_str.clone(), bytes));
                 on_event(RemoveEvent::Removed { path: path_str, bytes });
@@ -69,35 +144,6 @@ pub fn remove_items(
         }
     }
     summary
-}
-
-fn remove_one(
-    path: &Path,
-    known_size: Option<u64>,
-    mode: RemoveMode,
-    home: &Path,
-    trash: &trash::TrashContext,
-) -> Result<u64, String> {
-    // Check the path as given and with its parent resolved, so /var/db (a symlink to
-    // /private/var/db) can't sneak past the rules. The item itself may be a symlink we
-    // mean to remove, so only the parent is resolved.
-    let resolved = match (path.parent().map(fs::canonicalize), path.file_name()) {
-        (Some(Ok(parent)), Some(name)) => parent.join(name),
-        _ => path.to_path_buf(),
-    };
-    for p in [path, resolved.as_path()] {
-        if let Some(reason) = safety::protection(p, home) {
-            return Err(format!("Protected: {reason}"));
-        }
-    }
-    let md = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    let bytes = known_size.unwrap_or_else(|| fsutil::disk_usage(path));
-    match mode {
-        RemoveMode::Trash => trash.delete(path).map_err(|e| e.to_string())?,
-        RemoveMode::Delete if md.is_dir() => fs::remove_dir_all(path).map_err(|e| e.to_string())?,
-        RemoveMode::Delete => fs::remove_file(path).map_err(|e| e.to_string())?,
-    }
-    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -120,5 +166,20 @@ mod tests {
         assert_eq!(s.failed.len(), 1);
         assert!(s.failed[0].1.starts_with("Protected"));
         assert_eq!(events, 4);
+    }
+
+    #[test]
+    fn deletes_read_only_trees_and_missing_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let ro = dir.path().join("gomod/pkg@v1");
+        fs::create_dir_all(&ro).unwrap();
+        fs::write(ro.join("a.go"), b"package a").unwrap();
+        for p in [ro.as_path(), ro.parent().unwrap()] {
+            fs::set_permissions(p, fs::Permissions::from_mode(0o555)).unwrap();
+        }
+        let r = Remover::default();
+        r.remove(&dir.path().join("gomod"), RemoveMode::Delete).unwrap();
+        assert!(!dir.path().join("gomod").exists());
+        r.remove(&dir.path().join("never-existed"), RemoveMode::Delete).unwrap();
     }
 }

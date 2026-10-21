@@ -72,6 +72,51 @@ export interface RemoveSummary {
   bytesFreed: number;
 }
 
+export type Category = "system" | "developer" | "ai" | "mail" | "trash";
+export type ItemKind = "folder" | "file" | "app" | "project" | "model" | "device" | "trash";
+
+export interface CleanupItem {
+  id: string;
+  name: string;
+  detail: string | null;
+  path: string | null;
+  size: number;
+  kind: ItemKind;
+  mode: RemoveMode;
+  lastActivity: number | null;
+  recommended: boolean;
+  warning: string | null;
+}
+
+export interface CleanupGroup {
+  id: string;
+  category: Category;
+  title: string;
+  description: string;
+  items: CleanupItem[];
+  size: number;
+  note: string | null;
+}
+
+export interface CleanupReport {
+  groups: CleanupGroup[];
+  elapsedMs: number;
+  fullDiskAccess: boolean;
+  cancelled: boolean;
+}
+
+export type CleanEvent =
+  | { status: "started"; id: string; name: string; size: number; index: number; total: number }
+  | { status: "cleaned"; id: string; bytes: number }
+  | { status: "failed"; id: string; error: string; bytes: number };
+
+export interface CleanSummary {
+  cleaned: string[];
+  failed: [string, string][];
+  bytesFreed: number;
+  byCategory: Partial<Record<Category, number>>;
+}
+
 const tauriApi = {
   systemInfo: () => invoke<SystemInfo>("system_info"),
   volumes: () => invoke<Volume[]>("volumes_list"),
@@ -87,6 +132,20 @@ const tauriApi = {
     cancel: () => invoke<void>("space_lens_cancel"),
     list: (path: string) => invoke<Listing>("space_lens_list", { path }),
     discard: () => invoke<void>("space_lens_discard"),
+  },
+
+  cleanup: {
+    scan(categories: Category[] | null, onProgress: (p: Progress) => void) {
+      const ch = new Channel<Progress>();
+      ch.onmessage = onProgress;
+      return invoke<CleanupReport>("cleanup_scan", { categories, onProgress: ch });
+    },
+    cancel: () => invoke<void>("cleanup_cancel"),
+    clean(ids: string[], onEvent: (e: CleanEvent) => void) {
+      const ch = new Channel<CleanEvent>();
+      ch.onmessage = onEvent;
+      return invoke<CleanSummary>("cleanup_clean", { ids, onEvent: ch });
+    },
   },
 
   remove(items: { path: string; size?: number }[], mode: RemoveMode, onEvent: (e: RemoveEvent) => void) {
@@ -106,6 +165,11 @@ const mockApi: typeof tauriApi = {
     cancel: async () => {},
     list: mock.list,
     discard: async () => {},
+  },
+  cleanup: {
+    scan: mock.cleanupScan,
+    cancel: async () => {},
+    clean: mock.cleanupClean,
   },
   remove: (items, _mode, onEvent) => mock.remove(items, onEvent),
 };

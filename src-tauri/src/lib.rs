@@ -19,6 +19,9 @@ pub fn run() {
             commands::space_lens_list,
             commands::space_lens_discard,
             commands::remove_items,
+            commands::cleanup_scan,
+            commands::cleanup_cancel,
+            commands::cleanup_clean,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PenCleaner");

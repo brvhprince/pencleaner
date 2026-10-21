@@ -2,12 +2,14 @@
 //! the main thread (which owns the window) never stalls.
 
 use parking_lot::{Mutex, RwLock};
+use pencleaner_core::cleanup::{self, Category, CleanEvent, CleanSummary, Report};
 use pencleaner_core::progress::{Progress, ScanControl};
 use pencleaner_core::remove::{self, RemoveEvent, RemoveItem, RemoveMode, RemoveSummary};
 use pencleaner_core::space_lens::{self, Listing, ScanSummary, ScanTree};
 use pencleaner_core::volumes::{self, Volume};
 use pencleaner_core::{fsutil, permissions};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +24,8 @@ type CmdResult<T> = Result<T, String>;
 pub struct AppState {
     lens: RwLock<Option<ScanTree>>,
     lens_ctl: Mutex<Option<Arc<ScanControl>>>,
+    cleanup: RwLock<Option<Report>>,
+    cleanup_ctl: Mutex<Option<Arc<ScanControl>>>,
 }
 
 #[derive(Serialize)]
@@ -155,4 +159,53 @@ pub async fn remove_items(
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn cleanup_scan(
+    app: AppHandle,
+    categories: Option<Vec<Category>>,
+    on_progress: Channel<Progress>,
+) -> CmdResult<Report> {
+    let state = app.state::<AppState>();
+    let ctl = Arc::new(ScanControl::new());
+    *state.cleanup_ctl.lock() = Some(ctl.clone());
+    let done = stream_progress(ctl.clone(), on_progress);
+    let cats = categories.unwrap_or_else(|| cleanup::ALL.to_vec());
+    let result = tauri::async_runtime::spawn_blocking(move || cleanup::scan(&cats, &ctl))
+        .await
+        .map_err(|e| e.to_string());
+    done.store(true, Ordering::Relaxed);
+    *state.cleanup_ctl.lock() = None;
+
+    let report = result?;
+    *state.cleanup.write() = (!report.cancelled).then(|| report.clone());
+    Ok(report)
+}
+
+#[tauri::command]
+pub fn cleanup_cancel(state: State<'_, AppState>) {
+    if let Some(ctl) = state.cleanup_ctl.lock().as_ref() {
+        ctl.cancel();
+    }
+}
+
+/// Removes the items with these ids from the last report. Paths never cross IPC.
+#[tauri::command]
+pub async fn cleanup_clean(
+    app: AppHandle,
+    ids: Vec<String>,
+    on_event: Channel<CleanEvent>,
+) -> CmdResult<CleanSummary> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut guard = state.cleanup.write();
+        let report = guard.as_mut().ok_or("Scan again before cleaning")?;
+        let ids: HashSet<String> = ids.into_iter().collect();
+        Ok(report.clean(&ids, |ev| {
+            let _ = on_event.send(ev);
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

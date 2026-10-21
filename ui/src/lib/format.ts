@@ -37,3 +37,15 @@ export function duration(ms: number): string {
   if (s < 60) return `${s}s`;
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
+
+/** "today", "3 days ago", "2 months ago" from unix seconds. */
+export function ago(unixSeconds: number): string {
+  const d = Math.floor((Date.now() / 1000 - unixSeconds) / 86400);
+  if (d < 1) return "today";
+  if (d < 2) return "yesterday";
+  if (d < 30) return `${d} days ago`;
+  const m = Math.floor(d / 30.4);
+  if (m < 12) return m === 1 ? "a month ago" : `${m} months ago`;
+  const y = Math.floor(d / 365);
+  return y === 1 ? "a year ago" : `${y} years ago`;
+}
