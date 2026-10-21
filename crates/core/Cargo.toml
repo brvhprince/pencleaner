@@ -1,0 +1,17 @@
+[package]
+name = "pencleaner-core"
+description = "Scanning and cleanup engine for PenCleaner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+rayon.workspace = true
+libc.workspace = true
+parking_lot.workspace = true
+trash.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

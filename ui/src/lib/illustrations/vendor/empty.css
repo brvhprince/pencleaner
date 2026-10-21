@@ -1,0 +1,120 @@
+/*
+ * Empty: layout, type and the illustration palette.
+ *
+ * Theme it with these variables, on :root or on any parent:
+ *   --empty-color       the ink the lines are mixed from (default: currentColor)
+ *   --empty-background  the surface the empty state sits on (default: Canvas)
+ *   --empty-primary     the color for accent "primary" (default: #2563eb)
+ *   --empty-title-color, --empty-text-color, --empty-font-family
+ */
+
+.empty {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px 16px;
+  font-family: var(--empty-font-family, inherit);
+}
+
+.empty__image {
+  height: 100px;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.empty__image > svg {
+  height: 100%;
+  width: auto;
+}
+
+.empty__title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--empty-title-color, color-mix(in srgb, var(--empty-color, currentColor) 88%, transparent));
+}
+
+.empty__description {
+  max-width: 360px;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--empty-text-color, color-mix(in srgb, var(--empty-color, currentColor) 55%, transparent));
+}
+
+.empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+/* accent="primary": the four strokes from the primary color */
+.empty--primary {
+  --empty-accent-edge: color-mix(in srgb, var(--empty-primary, #2563eb) 55%, var(--empty-surface, var(--empty-background, Canvas)));
+  --empty-accent-mid: color-mix(in srgb, var(--empty-primary, #2563eb) 35%, var(--empty-surface, var(--empty-background, Canvas)));
+  --empty-accent-lo: color-mix(in srgb, var(--empty-primary, #2563eb) 18%, var(--empty-surface, var(--empty-background, Canvas)));
+  --empty-accent-strong: var(--empty-primary, #2563eb);
+}
+
+/* appearance="filled": three light tones, nearest lightest */
+.empty--filled {
+  --empty-fill-1: color-mix(in srgb, var(--empty-color, currentColor) 2%, var(--empty-surface, var(--empty-background, Canvas)));
+  --empty-fill-2: color-mix(in srgb, var(--empty-color, currentColor) 4%, var(--empty-surface, var(--empty-background, Canvas)));
+  --empty-fill-3: color-mix(in srgb, var(--empty-color, currentColor) 6%, var(--empty-surface, var(--empty-background, Canvas)));
+}
+
+.empty--primary.empty--filled {
+  --empty-fill-1: color-mix(in srgb, var(--empty-primary, #2563eb) 4%, var(--empty-surface, var(--empty-background, Canvas)));
+  --empty-fill-2: color-mix(in srgb, var(--empty-primary, #2563eb) 8%, var(--empty-surface, var(--empty-background, Canvas)));
+  --empty-fill-3: color-mix(in srgb, var(--empty-primary, #2563eb) 12%, var(--empty-surface, var(--empty-background, Canvas)));
+}
+
+/* The backdrop: a faint pattern behind the illustration */
+.empty__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  --empty-backdrop-line: color-mix(in srgb, var(--empty-color, currentColor) 7%, var(--empty-surface, var(--empty-background, Canvas)));
+  --empty-backdrop-cell: color-mix(in srgb, var(--empty-color, currentColor) 3%, var(--empty-surface, var(--empty-background, Canvas)));
+}
+
+.empty__backdrop > svg {
+  position: absolute;
+  left: 50%;
+  max-width: none;
+}
+
+.empty__cell {
+  opacity: var(--o);
+}
+
+.empty__ring {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .empty__cell {
+    animation: empty-backdrop-blink 5s ease-in-out infinite;
+  }
+  .empty__ring {
+    animation: empty-backdrop-wave 3.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+}
+
+@keyframes empty-backdrop-blink {
+  0%, 100% { opacity: 0; }
+  50% { opacity: var(--o); }
+}
+
+@keyframes empty-backdrop-wave {
+  0%, 100% { transform: scale(0.92); opacity: 0.55; }
+  50% { transform: scale(1.05); opacity: 1; }
+}
