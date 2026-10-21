@@ -25,6 +25,9 @@ pub fn read_bundle(app: &Path) -> Option<AppInfo> {
     let bundle_id = get("CFBundleIdentifier")?;
     let name = get("CFBundleDisplayName")
         .or_else(|| get("CFBundleName"))
+        // Some apps pad their name with invisible direction marks (U+200E…).
+        .map(|n| n.chars().filter(|c| !matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')).collect::<String>())
+        .map(|n| n.trim().to_owned())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| app.file_stem().unwrap_or_default().to_string_lossy().into_owned());
     Some(AppInfo { name, bundle_id, path: app.to_path_buf(), version: get("CFBundleShortVersionString") })
@@ -73,6 +76,30 @@ pub fn running_bundle_ids() -> HashSet<String> {
         .filter_map(|s| s.split('"').next())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_ascii_lowercase())
+        .collect()
+}
+
+/// Bundle ids of every app Spotlight knows about, including helpers nested inside other
+/// apps and tools installed outside /Applications.
+pub fn spotlight_apps() -> Vec<AppInfo> {
+    let Ok(out) = Command::new("/usr/bin/mdfind").arg("kMDItemContentType == com.apple.application-bundle").output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| read_bundle(Path::new(l))).collect()
+}
+
+/// Labels of installed launchd jobs (file names of their plists), lowercased.
+pub fn launchd_labels() -> HashSet<String> {
+    let home = home_dir();
+    let dirs = [
+        PathBuf::from("/Library/LaunchAgents"),
+        PathBuf::from("/Library/LaunchDaemons"),
+        home.join("Library/LaunchAgents"),
+    ];
+    dirs.iter()
+        .filter_map(|d| fs::read_dir(d).ok())
+        .flat_map(|rd| rd.flatten())
+        .filter_map(|e| e.file_name().to_string_lossy().strip_suffix(".plist").map(|s| s.to_ascii_lowercase()))
         .collect()
 }
 

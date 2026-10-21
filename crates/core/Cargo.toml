@@ -18,6 +18,8 @@ blake3 = "1"
 core-foundation = "0.10"
 core-graphics = "0.25"
 foreign-types = "0.5"
+core-foundation-sys = "0.8"
+base64 = "0.23"
 
 [dev-dependencies]
 tempfile = "3"

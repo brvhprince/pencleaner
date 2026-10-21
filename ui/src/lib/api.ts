@@ -151,6 +151,53 @@ export interface ClutterReport {
   cancelled: boolean;
 }
 
+export interface RelatedFile {
+  path: string;
+  label: string;
+  size: number;
+  admin: boolean;
+}
+
+export interface AppEntry {
+  id: string;
+  name: string;
+  version: string | null;
+  path: string;
+  size: number;
+  related: RelatedFile[];
+  relatedSize: number;
+  lastUsed: number | null;
+  appStore: boolean;
+  running: boolean;
+}
+
+export interface Leftover {
+  id: string;
+  vendorInstalled: boolean;
+  files: RelatedFile[];
+  size: number;
+  lastActivity: number | null;
+}
+
+export interface Installer {
+  path: string;
+  name: string;
+  size: number;
+  added: number | null;
+  installedApp: string | null;
+  recommended: boolean;
+}
+
+export interface AppsReport {
+  apps: AppEntry[];
+  leftovers: Leftover[];
+  installers: Installer[];
+  elapsedMs: number;
+  cancelled: boolean;
+}
+
+export type AppTarget = { kind: "app" | "leftover" | "installer"; id: string };
+
 /** URL for showing a local image in the webview. */
 export function fileSrc(path: string) {
   return inTauri ? convertFileSrc(path) : mock.thumb(path);
@@ -201,6 +248,20 @@ const tauriApi = {
     },
   },
 
+  apps: {
+    scan(onProgress: (p: Progress) => void) {
+      const ch = new Channel<Progress>();
+      ch.onmessage = onProgress;
+      return invoke<AppsReport>("apps_scan", { onProgress: ch });
+    },
+    remove(targets: AppTarget[], onEvent: (e: CleanEvent) => void) {
+      const ch = new Channel<CleanEvent>();
+      ch.onmessage = onEvent;
+      return invoke<CleanSummary>("apps_remove", { targets, onEvent: ch });
+    },
+    icon: (path: string) => invoke<string | null>("app_icon", { path }),
+  },
+
   remove(items: { path: string; size?: number }[], mode: RemoveMode, onEvent: (e: RemoveEvent) => void) {
     const ch = new Channel<RemoveEvent>();
     ch.onmessage = onEvent;
@@ -228,6 +289,11 @@ const mockApi: typeof tauriApi = {
     scan: mock.clutterScan,
     cancel: async () => {},
     remove: (ids, onEvent) => mock.remove(ids.map((path) => ({ path })), onEvent),
+  },
+  apps: {
+    scan: mock.appsScan,
+    remove: mock.appsRemove,
+    icon: async () => null,
   },
   remove: (items, _mode, onEvent) => mock.remove(items, onEvent),
 };

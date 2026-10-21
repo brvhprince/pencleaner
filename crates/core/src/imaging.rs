@@ -25,6 +25,15 @@ extern "C" {
     fn CGImageSourceCreateWithURL(url: CFURLRef, options: CFDictionaryRef) -> CGImageSourceRef;
     fn CGImageSourceCreateThumbnailAtIndex(src: CGImageSourceRef, index: usize, options: CFDictionaryRef) -> *mut core_graphics::sys::CGImage;
     fn CGImageSourceCopyPropertiesAtIndex(src: CGImageSourceRef, index: usize, options: CFDictionaryRef) -> CFDictionaryRef;
+    fn CGImageSourceGetCount(src: CGImageSourceRef) -> usize;
+    fn CGImageDestinationCreateWithData(
+        data: core_foundation_sys::data::CFMutableDataRef,
+        kind: CFStringRef,
+        count: usize,
+        options: CFDictionaryRef,
+    ) -> *const c_void;
+    fn CGImageDestinationAddImage(dest: *const c_void, image: *mut core_graphics::sys::CGImage, props: CFDictionaryRef);
+    fn CGImageDestinationFinalize(dest: *const c_void) -> bool;
     static kCGImageSourceCreateThumbnailFromImageAlways: CFStringRef;
     static kCGImageSourceThumbnailMaxPixelSize: CFStringRef;
     static kCGImageSourceCreateThumbnailWithTransform: CFStringRef;
@@ -125,10 +134,79 @@ pub fn fingerprint(path: &Path) -> Option<Fingerprint> {
     }
 }
 
+/// The app's icon as PNG bytes, about `px` wide. Reads the .icns named in Info.plist,
+/// picking the smallest representation that is at least `px` so it stays sharp.
+pub fn app_icon_png(app: &Path, px: u32) -> Option<Vec<u8>> {
+    let info = plist::Value::from_file(app.join("Contents/Info.plist")).ok()?;
+    let dict = info.as_dictionary()?;
+    let named = |k: &str| dict.get(k).and_then(|v| v.as_string()).map(str::to_owned);
+    let resources = app.join("Contents/Resources");
+    let candidates = [named("CFBundleIconFile"), named("CFBundleIconName"), Some("AppIcon".into())];
+    let icns = candidates.into_iter().flatten().map(|n| {
+        let p = resources.join(&n);
+        if p.extension().is_some() { p } else { p.with_extension("icns") }
+    }).find(|p| p.is_file())?;
+
+    let url = CFURL::from_path(&icns, false)?;
+    unsafe {
+        let src = CGImageSourceCreateWithURL(url.as_concrete_TypeRef(), std::ptr::null());
+        if src.is_null() {
+            return None;
+        }
+        let count = CGImageSourceGetCount(src);
+        let mut best: Option<(usize, u32)> = None;
+        for i in 0..count {
+            let props = CGImageSourceCopyPropertiesAtIndex(src, i, std::ptr::null());
+            if props.is_null() {
+                continue;
+            }
+            let props = CFDictionary::<CFString, CFType>::wrap_under_create_rule(props);
+            let w = dimension(&props, kCGImagePropertyPixelWidth);
+            let better = match best {
+                None => true,
+                Some((_, bw)) if bw < px => w > bw,
+                Some((_, bw)) => w >= px && w < bw,
+            };
+            if better {
+                best = Some((i, w));
+            }
+        }
+        let opts: CFDictionary<CFString, CFType> = CFDictionary::from_CFType_pairs(&[
+            (key(kCGImageSourceCreateThumbnailFromImageAlways), CFBoolean::true_value().as_CFType()),
+            (key(kCGImageSourceThumbnailMaxPixelSize), CFNumber::from(px as i32).as_CFType()),
+        ]);
+        let thumb = CGImageSourceCreateThumbnailAtIndex(src, best.map_or(0, |b| b.0), opts.as_concrete_TypeRef());
+        CFRelease(src as *const c_void);
+        if thumb.is_null() {
+            return None;
+        }
+        let image = CGImage::from_ptr(thumb);
+
+        let data = core_foundation_sys::data::CFDataCreateMutable(std::ptr::null(), 0);
+        let png = CFString::from_static_string("public.png");
+        let dest = CGImageDestinationCreateWithData(data, png.as_concrete_TypeRef(), 1, std::ptr::null());
+        if dest.is_null() {
+            CFRelease(data as *const c_void);
+            return None;
+        }
+        CGImageDestinationAddImage(dest, image.as_ptr(), std::ptr::null());
+        let ok = CGImageDestinationFinalize(dest);
+        CFRelease(dest);
+        let data = core_foundation::data::CFData::wrap_under_create_rule(data as core_foundation_sys::data::CFDataRef);
+        ok.then(|| data.bytes().to_vec())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn renders_app_icons_as_png() {
+        let png = app_icon_png(Path::new("/System/Applications/Calculator.app"), 64).expect("Calculator has an icon");
+        assert_eq!(&png[1..4], b"PNG");
+    }
 
     #[test]
     fn resized_copies_match_and_mirrored_images_dont() {

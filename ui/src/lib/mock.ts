@@ -1,6 +1,9 @@
 // Fake backend for running the UI in a plain browser (`pnpm dev`, then open
 // http://localhost:1420). Lets the UI be designed and screenshotted without Tauri.
 import type {
+  AppEntry,
+  AppTarget,
+  AppsReport,
   Category,
   ClutterReport,
   FileInfo,
@@ -147,6 +150,59 @@ function set(files: FileInfo[]): FileSet {
 
 const photo = (path: string, mb: number, ageDays: number) => file(path, mb, "image", { width: 4032, height: 3024, modified: days(ageDays) });
 
+const rel = (label: string, path: string, mb: number, admin = false) => ({ label, path, size: Math.round(mb * MB), admin });
+
+function app(name: string, id: string, appMb: number, usedDays: number | null, related: ReturnType<typeof rel>[], extra: Partial<AppEntry> = {}): AppEntry {
+  return {
+    id,
+    name,
+    version: "1.0",
+    path: `/Applications/${name}.app`,
+    size: Math.round(appMb * MB),
+    related,
+    relatedSize: related.reduce((s, f) => s + f.size, 0),
+    lastUsed: usedDays === null ? null : days(usedDays),
+    appStore: false,
+    running: false,
+    ...extra,
+  };
+}
+
+let appsReport: AppsReport | null = null;
+
+function buildApps(): AppsReport {
+  return {
+    elapsedMs: 6900,
+    cancelled: false,
+    apps: [
+      app("Claude", "com.anthropic.claudefordesktop", 659, 1, [rel("Application Support", `${HOME}/Library/Application Support/Claude`, 12200), rel("Caches", `${HOME}/Library/Caches/com.anthropic.claudefordesktop`, 18)], { running: true, version: "1.4.2" }),
+      app("Adobe Photoshop 2026", "com.adobe.Photoshop", 5180, 5, [rel("Preferences", `${HOME}/Library/Preferences/Adobe Photoshop 2026 Settings`, 3)], { version: "27.1" }),
+      app("Xcode", "com.apple.dt.Xcode", 5140, null, [rel("Caches", `${HOME}/Library/Caches/com.apple.dt.Xcode`, 3.2), rel("Launch Daemon", "/Library/LaunchDaemons/com.apple.dt.Xcode.helper.plist", 0.01, true)], { appStore: true, version: "26.0" }),
+      app("WhatsApp", "net.whatsapp.WhatsApp", 291, 0, [rel("Group Container", `${HOME}/Library/Group Containers/group.net.whatsapp.WhatsApp.shared`, 4300)], { appStore: true }),
+      app("Wondershare Filmora Mac", "com.wondershare.filmoramacos", 1190, null, [rel("Application Support", `${HOME}/Library/Application Support/Wondershare Filmora Mac`, 1990)]),
+      app("zoom.us", "us.zoom.xos", 410, 220, [
+        rel("Application Support", `${HOME}/Library/Application Support/zoom.us`, 0.7),
+        rel("Helper Tool", "/Library/PrivilegedHelperTools/us.zoom.ZoomDaemon", 0.3, true),
+        rel("Launch Daemon", "/Library/LaunchDaemons/us.zoom.ZoomDaemon.plist", 0.01, true),
+        rel("Preferences", `${HOME}/Library/Preferences/us.zoom.xos.plist`, 0.01),
+      ]),
+      app("DataGrip", "com.jetbrains.datagrip", 2730, null, []),
+      app("Microsoft Excel", "com.microsoft.Excel", 2740, null, [rel("Container", `${HOME}/Library/Containers/com.microsoft.Excel`, 8)]),
+    ],
+    leftovers: [
+      { id: "net.metaquotes.wine", vendorInstalled: false, files: [rel("Application Support", `${HOME}/Library/Application Support/net.metaquotes.wine`, 1200)], size: 1200 * MB, lastActivity: days(561) },
+      { id: "com.wondershare.installer", vendorInstalled: true, files: [rel("Application Support", "", 500), rel("WebKit Data", "", 17.6)], size: 517.6 * MB, lastActivity: days(647) },
+      { id: "com.tinyspeck.slackmacgap", vendorInstalled: false, files: [rel("HTTP Storage", "", 0.06), rel("Preferences", "", 0.04)], size: 0.1 * MB, lastActivity: days(345) },
+      { id: "com.surfshark.vpn", vendorInstalled: false, files: [rel("Group Container", "", 2), rel("App Scripts", "", 1)], size: 3 * MB, lastActivity: days(1131) },
+      { id: "com.adobe.aftereffects", vendorInstalled: true, files: [rel("WebKit Data", "", 0.5), rel("Preferences", "", 0.4)], size: 0.9 * MB, lastActivity: days(104) },
+    ],
+    installers: [
+      { path: `${HOME}/Downloads/Figma-125.4.dmg`, name: "Figma-125.4.dmg", size: 412 * MB, added: days(95), installedApp: null, recommended: true },
+      { path: `${HOME}/Downloads/Zoom.pkg`, name: "Zoom.pkg", size: 64 * MB, added: days(12), installedApp: "zoom.us", recommended: true },
+    ],
+  };
+}
+
 function buildClutter(): ClutterReport {
   return {
     root: HOME,
@@ -280,6 +336,32 @@ export const mock = {
       .sort((a, b) => b.size - a.size);
     const name = path === "/" ? "WANPEN" : path.split("/").pop()!;
     return { path, name, size: node.size, items: node.items ?? 0, denied: path === "/private", entries, restCount: 0, restSize: 0 };
+  },
+  async appsScan(onProgress: (p: Progress) => void): Promise<AppsReport> {
+    for (let i = 1; i <= 10; i++) {
+      onProgress({ items: i * 400, bytes: i * 9 * GB, current: `/Applications/App ${i}.app` });
+      await wait(110);
+    }
+    appsReport = buildApps();
+    return appsReport;
+  },
+  async appsRemove(targets: AppTarget[], onEvent: (e: CleanEvent) => void): Promise<CleanSummary> {
+    const out: CleanSummary = { cleaned: [], failed: [], bytesFreed: 0, byCategory: {} };
+    for (const [index, t] of targets.entries()) {
+      const a = appsReport?.apps.find((x) => x.id === t.id);
+      const size = a ? a.size + a.relatedSize : 0;
+      onEvent({ status: "started", id: t.id, name: a?.name ?? t.id, size, index, total: targets.length });
+      await wait(400);
+      if (a?.running) {
+        out.failed.push([t.id, `${a.name} is running. Quit it, then try again.`]);
+        onEvent({ status: "failed", id: t.id, error: "running", bytes: 0 });
+        continue;
+      }
+      out.cleaned.push(t.id);
+      out.bytesFreed += size;
+      onEvent({ status: "cleaned", id: t.id, bytes: size });
+    }
+    return out;
   },
   async clutterScan(_root: string, onProgress: (p: Progress) => void): Promise<ClutterReport> {
     const steps = location.hash.includes("slowscan") ? 400 : 12;

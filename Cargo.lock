@@ -2489,6 +2489,7 @@ dependencies = [
 name = "pencleaner"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "parking_lot",
  "pencleaner-core",
  "serde",
@@ -2503,8 +2504,10 @@ dependencies = [
 name = "pencleaner-core"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "blake3",
  "core-foundation",
+ "core-foundation-sys",
  "core-graphics",
  "foreign-types",
  "libc",

@@ -25,6 +25,9 @@ pub fn run() {
             commands::clutter_scan,
             commands::clutter_cancel,
             commands::clutter_remove,
+            commands::apps_scan,
+            commands::apps_remove,
+            commands::app_icon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PenCleaner");
