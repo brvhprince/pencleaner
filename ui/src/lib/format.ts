@@ -44,8 +44,8 @@ export function ago(unixSeconds: number): string {
   if (d < 1) return "today";
   if (d < 2) return "yesterday";
   if (d < 30) return `${d} days ago`;
-  const m = Math.floor(d / 30.4);
-  if (m < 12) return m === 1 ? "a month ago" : `${m} months ago`;
+  const m = Math.max(1, Math.round(d / 30.4));
+  if (d < 365) return m === 1 ? "a month ago" : `${m} months ago`;
   const y = Math.floor(d / 365);
   return y === 1 ? "a year ago" : `${y} years ago`;
 }

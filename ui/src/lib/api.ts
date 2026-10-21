@@ -1,5 +1,5 @@
 // Typed wrappers over the Tauri commands in src-tauri/src/commands.rs.
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { mock } from "./mock";
 
 /** False when the UI is opened in a plain browser; `mock` then stands in for Rust. */
@@ -117,6 +117,45 @@ export interface CleanSummary {
   byCategory: Partial<Record<Category, number>>;
 }
 
+export type FileKind = "image" | "video" | "audio" | "archive" | "installer" | "document" | "folder" | "other";
+
+export interface FileInfo {
+  path: string;
+  name: string;
+  size: number;
+  kind: FileKind;
+  modified: number | null;
+  created: number | null;
+  lastUsed: number | null;
+  added: number | null;
+  source: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+export interface FileSet {
+  id: string;
+  files: FileInfo[];
+  keep: string;
+  reclaimable: number;
+}
+
+export interface ClutterReport {
+  root: string;
+  filesScanned: number;
+  large: FileInfo[];
+  duplicates: FileSet[];
+  similar: FileSet[];
+  downloads: FileInfo[];
+  elapsedMs: number;
+  cancelled: boolean;
+}
+
+/** URL for showing a local image in the webview. */
+export function fileSrc(path: string) {
+  return inTauri ? convertFileSrc(path) : mock.thumb(path);
+}
+
 const tauriApi = {
   systemInfo: () => invoke<SystemInfo>("system_info"),
   volumes: () => invoke<Volume[]>("volumes_list"),
@@ -148,6 +187,20 @@ const tauriApi = {
     },
   },
 
+  clutter: {
+    scan(root: string, onProgress: (p: Progress) => void) {
+      const ch = new Channel<Progress>();
+      ch.onmessage = onProgress;
+      return invoke<ClutterReport>("clutter_scan", { root, onProgress: ch });
+    },
+    cancel: () => invoke<void>("clutter_cancel"),
+    remove(ids: string[], onEvent: (e: RemoveEvent) => void) {
+      const ch = new Channel<RemoveEvent>();
+      ch.onmessage = onEvent;
+      return invoke<RemoveSummary>("clutter_remove", { ids, onEvent: ch });
+    },
+  },
+
   remove(items: { path: string; size?: number }[], mode: RemoveMode, onEvent: (e: RemoveEvent) => void) {
     const ch = new Channel<RemoveEvent>();
     ch.onmessage = onEvent;
@@ -170,6 +223,11 @@ const mockApi: typeof tauriApi = {
     scan: mock.cleanupScan,
     cancel: async () => {},
     clean: mock.cleanupClean,
+  },
+  clutter: {
+    scan: mock.clutterScan,
+    cancel: async () => {},
+    remove: (ids, onEvent) => mock.remove(ids.map((path) => ({ path })), onEvent),
   },
   remove: (items, _mode, onEvent) => mock.remove(items, onEvent),
 };

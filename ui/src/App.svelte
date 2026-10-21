@@ -7,6 +7,7 @@
   import { MODULE, MODULES } from "./lib/modules";
   import { app } from "./lib/state.svelte";
   import Cleanup from "./modules/Cleanup.svelte";
+  import Clutter from "./modules/Clutter.svelte";
   import ComingSoon from "./modules/ComingSoon.svelte";
   import SpaceLens from "./modules/SpaceLens.svelte";
   import Tools from "./modules/Tools.svelte";
@@ -41,6 +42,8 @@
           <SpaceLens />
         {:else if app.module === "cleanup"}
           <Cleanup />
+        {:else if app.module === "clutter"}
+          <Clutter />
         {:else if app.module === "tools"}
           <Tools />
         {:else}

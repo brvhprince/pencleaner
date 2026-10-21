@@ -2,6 +2,10 @@
 // http://localhost:1420). Lets the UI be designed and screenshotted without Tauri.
 import type {
   Category,
+  ClutterReport,
+  FileInfo,
+  FileKind,
+  FileSet,
   CleanEvent,
   CleanSummary,
   CleanupGroup,
@@ -120,6 +124,66 @@ const project = (name: string, gb: number, ageDays: number, artifacts: string): 
 
 let cleanupReport: CleanupReport | null = null;
 
+function file(path: string, mb: number, kind: FileKind, extra: Partial<FileInfo> = {}): FileInfo {
+  return {
+    path: `${HOME}/${path}`,
+    name: path.split("/").pop()!,
+    size: Math.round(mb * MB),
+    kind,
+    modified: days(400),
+    created: days(700),
+    lastUsed: null,
+    added: null,
+    source: null,
+    width: null,
+    height: null,
+    ...extra,
+  };
+}
+
+function set(files: FileInfo[]): FileSet {
+  return { id: `set:${files[0].path}`, files, keep: files[0].path, reclaimable: files.slice(1).reduce((s, f) => s + f.size, 0) };
+}
+
+const photo = (path: string, mb: number, ageDays: number) => file(path, mb, "image", { width: 4032, height: 3024, modified: days(ageDays) });
+
+function buildClutter(): ClutterReport {
+  return {
+    root: HOME,
+    filesScanned: 391577,
+    elapsedMs: 43500,
+    cancelled: false,
+    large: [
+      file("Documents/Ideas/flowing-particles-collision-logo.zip", 1450, "archive"),
+      file("Documents/Ideas/flow-logo-reveal-2023-11-27.zip", 1220, "archive"),
+      file("Documents/Works/Poppa/Thanksgiving/IMG_1823.MOV", 893, "video", { lastUsed: days(569) }),
+      file("Documents/Ideas/fleet_travel_shopping_ui_kit.zip", 725, "archive"),
+      file("Documents/Works/Home/10X25.skp", 572, "document", { lastUsed: days(805) }),
+      file("Sites/js/veefyed/task/android/app/release/app-release.aab", 145, "installer", { lastUsed: days(402), modified: days(402) }),
+      file("Movies/screen-recording-demo.mov", 312, "video", { lastUsed: days(40), modified: days(40) }),
+    ],
+    duplicates: [
+      set([file("Documents/Works/NAEC/ID Cards/id-card-holder-mockup.zip", 223.5, "archive"), file("Downloads/id-card-holder-mockup.zip", 223.5, "archive", { modified: days(30) })]),
+      set([file("Documents/Works/Pencasa/clean-corporate-presets.zip", 141.4, "archive"), file("Desktop/clean-corporate-presets.zip", 141.4, "archive")]),
+      set([file("Documents/Works/Bulk SMS/Metronic_v9.2.2.fig", 130.3, "document"), file("Documents/Works/Bulk SMS/copy/Metronic_v9.2.2.fig", 130.3, "document")]),
+      set([file("Documents/Audio/Shiloh/Supernatural Supplies.mp3", 42.7, "audio"), file("Downloads/Supernatural Supplies.mp3", 42.7, "audio"), file("Desktop/Supernatural Supplies (1).mp3", 42.7, "audio")]),
+    ],
+    similar: [
+      set([photo("Pictures/Thanksgiving/IMG_1779.jpg", 5.4, 300), photo("Pictures/Thanksgiving/IMG_1777.jpg", 5.1, 300), photo("Pictures/Thanksgiving/IMG_1779-2.jpg", 4.9, 300), photo("Pictures/Thanksgiving/IMG_1777.heic", 2.6, 300)]),
+      set([photo("Documents/Works/Cards/back-card.tif", 88.1, 500), photo("Documents/Works/Cards/front-card.tif", 88.1, 500)]),
+      set([photo("Pictures/Thanksgiving/IMG_1869.jpg", 7.4, 280), photo("Pictures/Thanksgiving/IMG_1868.jpg", 7.4, 280), photo("Pictures/Thanksgiving/IMG_1869-2.jpg", 7.3, 280)]),
+    ],
+    downloads: [
+      file("Downloads/metronic-950", 2550, "folder", { added: days(120) }),
+      file("Downloads/Nicholas", 453, "folder", { added: days(60) }),
+      file("Downloads/themeforest-huro-admin.zip", 167, "archive", { added: days(210), source: "mega.nz" }),
+      file("Downloads/Figma.dmg", 412, "installer", { added: days(95), source: "figma.com" }),
+      file("Downloads/penvote-full.zip", 32.8, "archive", { added: days(15), source: "drive.usercontent.google.com" }),
+      file("Downloads/invoice-0042.pdf", 0.4, "document", { added: days(3), source: "mail.google.com" }),
+    ],
+  };
+}
+
 function buildReport(): CleanupReport {
   return {
     elapsedMs: 45700,
@@ -216,6 +280,21 @@ export const mock = {
       .sort((a, b) => b.size - a.size);
     const name = path === "/" ? "WANPEN" : path.split("/").pop()!;
     return { path, name, size: node.size, items: node.items ?? 0, denied: path === "/private", entries, restCount: 0, restSize: 0 };
+  },
+  async clutterScan(_root: string, onProgress: (p: Progress) => void): Promise<ClutterReport> {
+    const steps = location.hash.includes("slowscan") ? 400 : 12;
+    for (let i = 1; i <= steps; i++) {
+      onProgress({ items: i * 32000, bytes: i * 4 * GB, current: `${HOME}/Documents/Works/NAEC/Designs/teachers-need-${i}.jpg` });
+      await wait(110);
+    }
+    return buildClutter();
+  },
+  /** Stand-in "photo" so the browser preview shows something in the image grid. */
+  thumb(path: string): string {
+    let h = 0;
+    for (const c of path.replace(/(-\d)?\.\w+$/, "")) h = (h * 31 + c.charCodeAt(0)) % 360;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 3"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="hsl(${h},60%,62%)"/><stop offset="1" stop-color="hsl(${(h + 50) % 360},55%,35%)"/></linearGradient></defs><rect width="4" height="3" fill="url(#g)"/><circle cx="2.8" cy="1" r=".45" fill="hsl(${(h + 180) % 360},70%,85%)"/></svg>`;
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
   },
   async cleanupScan(_categories: Category[] | null, onProgress: (p: Progress) => void): Promise<CleanupReport> {
     const steps = location.hash.includes("slowscan") ? 400 : 12;

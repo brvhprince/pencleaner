@@ -43,6 +43,30 @@ pub fn set_observer_io_policy() {
     }
 }
 
+/// Where a file's data starts on the physical device. APFS clones (what Finder makes when
+/// you duplicate a file, and what pnpm/Bun use to install packages) share their blocks, so
+/// two copies reporting the same address free nothing when one is deleted.
+/// (ATTR_CMNEXT_PRIVATESIZE would be the direct answer, but it reports 0 for files written
+/// before clone tracking existed on the volume, so it can't be trusted.)
+pub fn physical_offset(path: &Path) -> Option<u64> {
+    use std::os::unix::io::AsRawFd;
+
+    // <sys/fcntl.h>, #pragma pack(4)
+    #[repr(C, packed(4))]
+    struct Log2Phys {
+        flags: u32,
+        contigbytes: i64,
+        devoffset: i64,
+    }
+    const F_LOG2PHYS_EXT: libc::c_int = 65;
+
+    let f = fs::File::open(path).ok()?;
+    let mut l = Log2Phys { flags: 0, contigbytes: 1, devoffset: 0 };
+    let r = unsafe { libc::fcntl(f.as_raw_fd(), F_LOG2PHYS_EXT, &mut l as *mut Log2Phys) };
+    let off = l.devoffset;
+    (r != -1 && off > 0).then_some(off as u64)
+}
+
 pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -94,6 +118,22 @@ fn usage_inner(path: &Path, inodes: &InodeSet) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clones_share_their_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b, c) = (dir.path().join("a.bin"), dir.path().join("b.bin"), dir.path().join("c.bin"));
+        let data = vec![42u8; 2 * 1024 * 1024];
+        fs::write(&a, &data).unwrap();
+        // A real copy: write the bytes again (std::fs::copy clones on APFS).
+        fs::write(&c, &data).unwrap();
+        let ok = std::process::Command::new("/bin/cp").arg("-c").arg(&a).arg(&b).status().unwrap();
+        assert!(ok.success());
+        let (pa, pb, pc) = (physical_offset(&a), physical_offset(&b), physical_offset(&c));
+        assert!(pa.is_some());
+        assert_eq!(pa, pb, "a clone shares its blocks");
+        assert_ne!(pa, pc, "a byte copy has its own blocks");
+    }
 
     #[test]
     fn hard_links_count_once() {

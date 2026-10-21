@@ -57,7 +57,13 @@ const SUBPROJECT_DIRS: &[&str] = &[
 const HOME_SKIP: &[&str] = &["Library", "Pictures", "Music", "Movies", "Applications", "Public"];
 
 /// Package-style folders that are never project trees.
-const BUNDLE_EXTS: &[&str] = &["app", "photoslibrary", "musiclibrary", "tvlibrary", "fcpbundle", "logicx", "imovielibrary", "xcarchive", "framework", "bundle"];
+pub(crate) const BUNDLE_EXTS: &[&str] = &["app", "photoslibrary", "musiclibrary", "tvlibrary", "fcpbundle", "logicx", "imovielibrary", "xcarchive", "framework", "bundle"];
+
+/// True for a regenerable build folder: `name` inside a folder whose entries are `markers`.
+pub(crate) fn is_build_artifact(name: &str, path: &Path, markers: &[String]) -> bool {
+    ARTIFACTS.iter().any(|a| a.dir == name && a.markers.iter().any(|m| matches_marker(markers, m)))
+        || (VENV_NAMES.contains(&name) && path.join("pyvenv.cfg").is_file())
+}
 
 struct Found {
     project: PathBuf,
@@ -104,9 +110,7 @@ fn walk(dir: &Path, git_root: Option<&Path>, depth: usize, cx: &Cx, out: &Mutex<
 
     let mut descend = Vec::new();
     for (name, path) in dirs {
-        let is_artifact = ARTIFACTS.iter().any(|a| a.dir == name && a.markers.iter().any(|m| matches_marker(&markers, m)))
-            || (VENV_NAMES.contains(&name.as_str()) && path.join("pyvenv.cfg").is_file());
-        if is_artifact {
+        if is_build_artifact(&name, &path, &markers) {
             out.lock().push(Found { project: project.to_path_buf(), artifact: path });
             continue;
         }

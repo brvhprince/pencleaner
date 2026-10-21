@@ -3,6 +3,7 @@
 
 use parking_lot::{Mutex, RwLock};
 use pencleaner_core::cleanup::{self, Category, CleanEvent, CleanSummary, Report};
+use pencleaner_core::clutter::{self, ClutterReport};
 use pencleaner_core::progress::{Progress, ScanControl};
 use pencleaner_core::remove::{self, RemoveEvent, RemoveItem, RemoveMode, RemoveSummary};
 use pencleaner_core::space_lens::{self, Listing, ScanSummary, ScanTree};
@@ -26,6 +27,8 @@ pub struct AppState {
     lens_ctl: Mutex<Option<Arc<ScanControl>>>,
     cleanup: RwLock<Option<Report>>,
     cleanup_ctl: Mutex<Option<Arc<ScanControl>>>,
+    clutter: RwLock<Option<ClutterReport>>,
+    clutter_ctl: Mutex<Option<Arc<ScanControl>>>,
 }
 
 #[derive(Serialize)]
@@ -203,6 +206,50 @@ pub async fn cleanup_clean(
         let report = guard.as_mut().ok_or("Scan again before cleaning")?;
         let ids: HashSet<String> = ids.into_iter().collect();
         Ok(report.clean(&ids, |ev| {
+            let _ = on_event.send(ev);
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn clutter_scan(app: AppHandle, root: String, on_progress: Channel<Progress>) -> CmdResult<ClutterReport> {
+    let state = app.state::<AppState>();
+    let ctl = Arc::new(ScanControl::new());
+    *state.clutter_ctl.lock() = Some(ctl.clone());
+    let done = stream_progress(ctl.clone(), on_progress);
+    let root = PathBuf::from(root);
+    let result = tauri::async_runtime::spawn_blocking(move || clutter::scan(&root, &ctl))
+        .await
+        .map_err(|e| e.to_string());
+    done.store(true, Ordering::Relaxed);
+    *state.clutter_ctl.lock() = None;
+
+    let report = result?;
+    *state.clutter.write() = (!report.cancelled).then(|| report.clone());
+    Ok(report)
+}
+
+#[tauri::command]
+pub fn clutter_cancel(state: State<'_, AppState>) {
+    if let Some(ctl) = state.clutter_ctl.lock().as_ref() {
+        ctl.cancel();
+    }
+}
+
+/// Moves files from the last My Clutter report to the Trash. Unknown paths are ignored.
+#[tauri::command]
+pub async fn clutter_remove(
+    app: AppHandle,
+    ids: Vec<String>,
+    on_event: Channel<RemoveEvent>,
+) -> CmdResult<RemoveSummary> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut guard = state.clutter.write();
+        let report = guard.as_mut().ok_or("Scan again before removing files")?;
+        Ok(report.remove(&ids, |ev| {
             let _ = on_event.send(ev);
         }))
     })

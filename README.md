@@ -20,11 +20,13 @@ pnpm dev                       # UI only, in a browser, backed by ui/src/lib/moc
 cargo test -p pencleaner-core  # engine tests
 cargo run --release -p pencleaner-core --example scan -- ~/Sites   # Space Lens from the terminal
 cargo run --release -p pencleaner-core --example cleanup [developer] # Cleanup dry run (never deletes)
+cargo run --release -p pencleaner-core --example clutter [folder]    # My Clutter dry run (never deletes)
 ```
 
 In a browser, `http://localhost:1420/#autoscan&open=/Users/wanpeninsula&select&review`
 drives Space Lens through every state against the mock backend, and
-`#module=cleanup&autoscan&review=projects` (or `&confirm`, `&clean`) does the same for Cleanup.
+`#module=cleanup&autoscan&review=projects` (or `&confirm`, `&clean`) does the same for Cleanup,
+and `#module=clutter&autoscan&review=similar` for My Clutter.
 
 **Full Disk Access:** without it macOS hides Mail, Safari, containers and more. During
 `tauri dev` the app runs inside your terminal, so grant access to the terminal (or IDE).

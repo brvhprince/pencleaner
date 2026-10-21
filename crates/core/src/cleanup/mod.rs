@@ -5,7 +5,7 @@
 //! The UI only ever sends item ids back, so nothing outside a scan report can be removed.
 
 mod ai;
-mod dev;
+pub(crate) mod dev;
 mod mail;
 mod system;
 mod trash_bins;

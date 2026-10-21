@@ -142,7 +142,6 @@ export const MODULES: ModuleDef[] = [
       { icon: Download, label: "Downloads" },
     ],
     theme: theme("#0c2b2a", "#1b5652", "#3b8a7e", "#4fa898", "#6fe0c8", "#a5f0e0"),
-    comingIn: "Phase 4",
   },
   {
     id: "spacelens",
