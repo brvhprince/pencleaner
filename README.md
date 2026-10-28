@@ -95,3 +95,7 @@ standard macOS password prompt, and only for paths on a short allowlist
 Cleanup only acts on item ids from its own last scan report, so the UI can never ask it to
 delete an arbitrary path, and anything carrying a warning needs a second confirmation.
 Scans never download iCloud placeholders and never touch access times.
+
+## License
+
+MIT. See [LICENSE](LICENSE). 
