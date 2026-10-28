@@ -3,7 +3,6 @@ use crate::safety;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -47,7 +46,9 @@ pub struct Remover {
 
 impl Default for Remover {
     fn default() -> Self {
+        #[allow(unused_mut)]
         let mut trash = trash::TrashContext::default();
+        #[cfg(target_os = "macos")]
         {
             use trash::macos::{DeleteMethod, TrashContextExtMacos};
             // Finder's method plays a sound per item and needs Automation permission.
@@ -111,7 +112,16 @@ fn make_dirs_writable(path: &Path) {
         return;
     }
     let mut perms = md.permissions();
-    perms.set_mode(perms.mode() | 0o700);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(perms.mode() | 0o700);
+    }
+    // Windows only: clears the read-only attribute (the Unix caveat clippy warns about
+    // doesn't apply; Unix takes the branch above).
+    #[cfg(windows)]
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
     let _ = fs::set_permissions(path, perms);
     if let Ok(rd) = fs::read_dir(path) {
         for e in rd.flatten() {
@@ -175,7 +185,9 @@ mod tests {
         fs::create_dir_all(&ro).unwrap();
         fs::write(ro.join("a.go"), b"package a").unwrap();
         for p in [ro.as_path(), ro.parent().unwrap()] {
-            fs::set_permissions(p, fs::Permissions::from_mode(0o555)).unwrap();
+            let mut perms = fs::metadata(p).unwrap().permissions();
+            perms.set_readonly(true);
+            fs::set_permissions(p, perms).unwrap();
         }
         let r = Remover::default();
         r.remove(&dir.path().join("gomod"), RemoveMode::Delete).unwrap();

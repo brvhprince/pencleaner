@@ -36,7 +36,7 @@ fn watched_dirs() -> [PathBuf; 3] {
 }
 
 pub fn data_dir() -> PathBuf {
-    home_dir().join("Library/Application Support/com.pen.cleaner")
+    crate::fsutil::data_dir()
 }
 
 fn agent_path() -> PathBuf {

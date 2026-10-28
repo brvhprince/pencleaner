@@ -1,6 +1,8 @@
-# Lint, type-check and test on every push to main and every pull request.
-# macOS runners count 10x against a private repo's free Actions minutes, so docs-only
-# changes are skipped and a newer push cancels the run it replaces.
+# Lint, type-check and test on every push to main and every pull request, on macOS and
+# Windows; the Windows job also builds an installer to try on a PC (see the run's
+# Artifacts). macOS runners count 10x and Windows 2x against a private repo's free
+# Actions minutes, so docs-only changes are skipped and a newer push cancels the run
+# it replaces.
 name: CI
 
 on:
@@ -16,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  macos:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -44,3 +46,39 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the UI
+        run: pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test the engine
+        run: cargo test -p pencleaner-core --locked
+
+      # Unsigned for now: Windows SmartScreen warns once ("More info" → "Run anyway").
+      - name: Build the installer
+        run: pnpm tauri build --bundles nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PenCleaner-windows-installer
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14

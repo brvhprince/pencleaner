@@ -5,7 +5,7 @@ use pencleaner_core::{bytes_label, cleanup, progress::ScanControl, settings};
 fn main() {
     let t = std::time::Instant::now();
     let mut r = cleanup::scan(&[cleanup::Category::System, cleanup::Category::Developer, cleanup::Category::Ai], &ScanControl::new());
-    let dir = pencleaner_core::protection::watch::data_dir();
+    let dir = pencleaner_core::fsutil::data_dir();
     r.apply_ignore(&settings::load(&dir).matcher());
     let ids = r.auto_ids();
     let mut total = 0;

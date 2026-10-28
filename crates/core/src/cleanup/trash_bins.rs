@@ -1,6 +1,8 @@
 use super::*;
+#[cfg(target_os = "macos")]
 use crate::volumes;
 
+#[cfg_attr(windows, allow(dead_code))]
 fn bin(cx: &Cx, dir: &Path, name: String) -> Option<Item> {
     let entries = children(dir);
     if entries.is_empty() {
@@ -22,6 +24,13 @@ fn bin(cx: &Cx, dir: &Path, name: String) -> Option<Item> {
     })
 }
 
+/// The Recycle Bin is handled by the shell on Windows (coming with the Windows cleanup).
+#[cfg(windows)]
+pub fn trash_bins(_cx: &Cx) -> Vec<Group> {
+    Vec::new()
+}
+
+#[cfg(target_os = "macos")]
 pub fn trash_bins(cx: &Cx) -> Vec<Group> {
     let uid = unsafe { libc::getuid() };
     let vols = volumes::list();

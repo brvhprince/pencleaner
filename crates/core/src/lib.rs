@@ -1,29 +1,57 @@
 //! PenCleaner engine: everything that touches the filesystem lives here, free of any
 //! Tauri dependency so it can be unit-tested and driven from a CLI.
 
+// Shared by every platform.
 pub mod activity;
-pub mod applications;
-pub mod apps;
 pub mod care;
 pub mod cleanup;
 pub mod clutter;
 pub mod error;
 pub mod fsutil;
-pub mod imaging;
-pub mod performance;
-pub mod permissions;
-pub mod privileged;
-pub mod protection;
 pub mod progress;
 pub mod remove;
 pub mod safety;
-pub mod sensors;
 pub mod settings;
 pub mod space_lens;
-pub mod spotlight;
-pub mod updater;
-pub mod vitals;
 pub mod volumes;
+
+// macOS only: app bundles, launchd, codesign, XProtect, TCC, Time Machine, IOKit.
+#[cfg(target_os = "macos")]
+pub mod applications;
+#[cfg(target_os = "macos")]
+pub mod performance;
+#[cfg(target_os = "macos")]
+pub mod privileged;
+#[cfg(target_os = "macos")]
+pub mod protection;
+#[cfg(target_os = "macos")]
+pub mod sensors;
+#[cfg(target_os = "macos")]
+pub mod updater;
+#[cfg(target_os = "macos")]
+pub mod vitals;
+
+// Used by shared code; Windows has stand-ins with the same names (src/windows/).
+#[cfg(target_os = "macos")]
+pub mod apps;
+#[cfg(windows)]
+#[path = "windows/apps.rs"]
+pub mod apps;
+#[cfg(target_os = "macos")]
+pub mod imaging;
+#[cfg(windows)]
+#[path = "windows/imaging.rs"]
+pub mod imaging;
+#[cfg(target_os = "macos")]
+pub mod permissions;
+#[cfg(windows)]
+#[path = "windows/permissions.rs"]
+pub mod permissions;
+#[cfg(target_os = "macos")]
+pub mod spotlight;
+#[cfg(windows)]
+#[path = "windows/spotlight.rs"]
+pub mod spotlight;
 
 pub use error::{Error, Result};
 

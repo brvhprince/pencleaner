@@ -4,8 +4,8 @@
 use crate::commands::{record, AppState};
 use pencleaner_core::care::{self, Due};
 use pencleaner_core::progress::ScanControl;
-use pencleaner_core::protection::watch::{self, post_notification};
-use pencleaner_core::{bytes_label, settings};
+use crate::notify::post as post_notification;
+use pencleaner_core::{bytes_label, fsutil, settings};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
@@ -26,7 +26,7 @@ pub fn start(app: AppHandle) {
 }
 
 fn tick(app: &AppHandle) {
-    let dir = watch::data_dir();
+    let dir = fsutil::data_dir();
     let settings = settings::load(&dir);
     let mut state = care::load(&dir);
     match care::check(&settings, &state, now()) {

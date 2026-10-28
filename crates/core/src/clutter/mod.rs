@@ -16,7 +16,6 @@ use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs::{self, Metadata};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 
@@ -118,11 +117,12 @@ fn secs(t: std::io::Result<std::time::SystemTime>) -> Option<i64> {
 
 impl Rec {
     fn from(path: PathBuf, md: &Metadata) -> Self {
+        let (dev, ino, _) = fsutil::link_identity(md);
         Rec {
             len: md.len(),
             alloc: fsutil::allocated(md),
-            dev: md.dev(),
-            ino: md.ino(),
+            dev,
+            ino,
             modified: secs(md.modified()),
             created: secs(md.created()),
             path,

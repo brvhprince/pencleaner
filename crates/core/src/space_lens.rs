@@ -9,7 +9,6 @@ use crate::{Error, Result};
 use rayon::prelude::*;
 use serde::Serialize;
 use std::fs;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -116,11 +115,11 @@ fn scan_with(root: &Path, ctl: &ScanControl, classic: bool) -> Result<ScanTree> 
     let started = Instant::now();
     fsutil::set_observer_io_policy();
     let md = fs::metadata(root).map_err(|e| Error::io(root, e))?;
-    let mut devices = vec![md.dev()];
+    let mut devices = vec![fsutil::device(&md)];
     if root == Path::new("/") {
         // /Users, /Applications… are firmlinks into the Data volume.
         if let Ok(data) = fs::metadata("/System/Volumes/Data") {
-            devices.push(data.dev());
+            devices.push(fsutil::device(&data));
         }
     }
     let ctx = Ctx { ctl, inodes: InodeSet::default(), devices, denied: AtomicU64::new(0), classic };
@@ -208,7 +207,7 @@ fn classic(rd: fs::ReadDir, ctx: &Ctx, subdirs: &mut Vec<(PathBuf, Box<str>, u64
         *items += 1;
         if md.is_dir() {
             let p = entry.path();
-            if !ctx.devices.contains(&md.dev()) || fsutil::is_dataless(&md) || SKIP.iter().any(|s| p == Path::new(s)) {
+            if !ctx.devices.contains(&fsutil::device(&md)) || fsutil::is_dataless(&md) || SKIP.iter().any(|s| p == Path::new(s)) {
                 continue;
             }
             let name: Box<str> = entry.file_name().to_string_lossy().into();
@@ -402,6 +401,7 @@ mod tests {
         write(&r.join("a/b/two.bin"), 120);
         write(&r.join("c/three.bin"), 8);
         std::fs::hard_link(r.join("a/one.bin"), r.join("c/one-again.bin")).unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink(r.join("a"), r.join("link-to-a")).unwrap();
         std::fs::create_dir(r.join("empty")).unwrap();
 
