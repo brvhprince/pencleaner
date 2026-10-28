@@ -17,7 +17,6 @@
     <Illustration name={module.illustration} size={250} hero />
   </div>
   <div class="copy">
-    {#if module.comingIn}<span class="soon">Coming in {module.comingIn}</span>{/if}
     <h1>{module.title}</h1>
     <p class="tagline">{module.tagline}</p>
     <ul>
@@ -90,16 +89,5 @@
   }
   .extra {
     margin-top: 30px;
-  }
-  .soon {
-    display: inline-block;
-    margin-bottom: 14px;
-    padding: 4px 10px;
-    border-radius: 99px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    background: rgba(255, 255, 255, 0.12);
-    border: 1px solid rgba(255, 255, 255, 0.16);
   }
 </style>

@@ -78,8 +78,7 @@
         <h3>{t.title}</h3>
         <p>{t.text}</p>
         <div class="foot">
-          {#if m.comingIn}<span class="soon">{m.comingIn}</span>{/if}
-          <button class="btn" onclick={() => app.go(t.module)}>{m.comingIn ? "Preview" : "Open"}</button>
+          <button class="btn" onclick={() => app.go(t.module)}>Open</button>
         </div>
       </article>
     {:else}
@@ -166,9 +165,5 @@
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
-  }
-  .soon {
-    font-size: 11px;
-    color: var(--text-3);
   }
 </style>

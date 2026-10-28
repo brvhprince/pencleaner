@@ -8,7 +8,7 @@ export interface Toast {
 }
 
 class AppState {
-  module = $state<ModuleId>("spacelens");
+  module = $state<ModuleId>("smartcare");
   /** Each module reports where it is; anything but "home" collapses the sidebar. */
   phases = $state<Partial<Record<ModuleId, "home" | "scanning" | "results">>>({});
   compact = $derived((this.phases[this.module] ?? "home") !== "home");

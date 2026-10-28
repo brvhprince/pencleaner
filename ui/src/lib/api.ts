@@ -268,6 +268,15 @@ export interface TaskResult {
   message: string;
 }
 
+export interface ActivityEvent {
+  at: number;
+  module: "cleanup" | "clutter" | "applications" | "spacelens" | "performance";
+  action: string;
+  bytes: number;
+  items: number;
+  detail: string | null;
+}
+
 /** URL for showing a local image in the webview. */
 export function fileSrc(path: string) {
   return inTauri ? convertFileSrc(path) : mock.thumb(path);
@@ -346,6 +355,11 @@ const tauriApi = {
     openLoginItemsSettings: () => invoke<void>("open_login_items_settings"),
   },
 
+  activity: {
+    list: () => invoke<ActivityEvent[]>("activity_list"),
+    clear: () => invoke<void>("activity_clear"),
+  },
+
   remove(items: { path: string; size?: number }[], mode: RemoveMode, onEvent: (e: RemoveEvent) => void) {
     const ch = new Channel<RemoveEvent>();
     ch.onmessage = onEvent;
@@ -380,6 +394,7 @@ const mockApi: typeof tauriApi = {
     icon: async () => null,
   },
   perf: mock.perf,
+  activity: mock.activity,
   remove: (items, _mode, onEvent) => mock.remove(items, onEvent),
 };
 

@@ -57,8 +57,6 @@ export interface ModuleDef {
   illustration: string;
   features: Feature[];
   theme: Theme;
-  /** Which build phase delivers the scan; undefined once it works. */
-  comingIn?: string;
   /** Rendered below the sidebar's main group. */
   secondary?: boolean;
 }
@@ -83,7 +81,6 @@ export const MODULES: ModuleDef[] = [
       { icon: HardDrive, label: "Storage Check" },
     ],
     theme: theme("#240d45", "#4a1a78", "#86308f", "#a63ab3", "#c85bd8", "#e183ee"),
-    comingIn: "Phase 7",
   },
   {
     id: "cleanup",
@@ -172,7 +169,6 @@ export const MODULES: ModuleDef[] = [
     illustration: "insights",
     features: [],
     theme: theme("#14112a", "#241e3f", "#3a2c5c", "#3c3470", "#8fa8ff", "#bccbff"),
-    comingIn: "Phase 7",
     secondary: true,
   },
 ];

@@ -115,7 +115,8 @@ class Cleanup {
     }
   }
 
-  async scan() {
+  /** `quiet`: Smart Care runs this and reports for itself. */
+  async scan(quiet = false) {
     this.progress = null;
     this.setPhase("scanning");
     try {
@@ -129,7 +130,7 @@ class Cleanup {
       this.applyRecommendations();
       this.view = "summary";
       this.setPhase("results");
-      if (app.module !== "cleanup") app.toast(`Cleanup found ${bytes(this.foundSize)} you could free.`, "success");
+      if (!quiet && app.module !== "cleanup") app.toast(`Cleanup found ${bytes(this.foundSize)} you could free.`, "success");
     } catch (e) {
       app.toast(`Scan failed: ${e}`, "error");
       this.setPhase("home");

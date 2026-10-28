@@ -25,12 +25,25 @@ cargo run --release -p pencleaner-core --example apps                # Applicati
 cargo run --release -p pencleaner-core --example perf                # Performance readout (runs no tasks)
 ```
 
-In a browser, `http://localhost:1420/#autoscan&open=/Users/wanpeninsula&select&review`
+In a browser, `http://localhost:1420/#module=spacelens&autoscan&open=/Users/wanpeninsula&select&review`
 drives Space Lens through every state against the mock backend, and
 `#module=cleanup&autoscan&review=projects` (or `&confirm`, `&clean`) does the same for Cleanup,
 `#module=clutter&autoscan&review=similar` for My Clutter, and
 `#module=applications&autoscan&review=apps&expand` (or `&confirm`) for Applications, and
-`#module=performance&autoscan&review=background` (or `tasks&run`, `memory`, `snapshots`) for Performance.
+`#module=performance&autoscan&review=background` (or `tasks&run`, `memory`, `snapshots`) for Performance,
+`#module=smartcare&autoscan&run` for Smart Care, and `#module=activity` (or `&noactivity`) for My Activity.
+
+## Modules
+
+| Module | What it does |
+|---|---|
+| Smart Care | One scan across Cleanup, Performance and app leftovers; runs only safe, recommended items |
+| Cleanup | System, developer, AI, Mail and Trash junk |
+| Performance | Maintenance tasks, memory, login and background items, Time Machine snapshots |
+| Applications | Uninstaller with support files, leftovers of removed apps, installer files |
+| My Clutter | Duplicates, similar images, large and old files, Downloads |
+| Space Lens | Bubble map of what's using the disk |
+| My Activity | History of everything freed, removed or run (`~/Library/Application Support/com.pen.cleaner/activity.jsonl`) |
 
 **Full Disk Access:** without it macOS hides Mail, Safari, containers and more. During
 `tauri dev` the app runs inside your terminal, so grant access to the terminal (or IDE).

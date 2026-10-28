@@ -1,6 +1,7 @@
 // Fake backend for running the UI in a plain browser (`pnpm dev`, then open
 // http://localhost:1420). Lets the UI be designed and screenshotted without Tauri.
 import type {
+  ActivityEvent,
   LaunchItem,
   PerfReport,
   TaskResult,
@@ -232,6 +233,20 @@ function buildPerf(): PerfReport {
   };
 }
 
+let activity: ActivityEvent[] = location.hash.includes("noactivity")
+  ? []
+  : [
+      { at: days(27), module: "cleanup", action: "Cleaned junk", bytes: 84.5 * GB, items: 11, detail: "system" },
+      { at: days(27), module: "performance", action: "Ran maintenance", bytes: 0, items: 3, detail: "free-ram, flush-dns, quicklook" },
+      { at: days(21), module: "spacelens", action: "Moved to the Trash", bytes: 24.9 * GB, items: 2, detail: null },
+      { at: days(14), module: "cleanup", action: "Cleaned junk", bytes: 85.7 * GB, items: 19, detail: "developer, ai" },
+      { at: days(9), module: "clutter", action: "Moved files to the Trash", bytes: 581 * MB, items: 5, detail: null },
+      { at: days(6), module: "applications", action: "Removed app leftovers", bytes: 1.7 * GB, items: 5, detail: null },
+      { at: days(3), module: "performance", action: "Removed Time Machine snapshots", bytes: 59 * GB, items: 18, detail: null },
+      { at: days(1), module: "performance", action: "Switched off a background item", bytes: 0, items: 1, detail: "kafka-server-start" },
+      { at: days(0), module: "cleanup", action: "Cleaned junk", bytes: 2.2 * GB, items: 6, detail: "system" },
+    ];
+
 const perf = {
   scan: async () => {
     await wait(900);
@@ -408,6 +423,12 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const mock = {
   perf,
+  activity: {
+    list: async () => activity,
+    clear: async () => {
+      activity = [];
+    },
+  },
   async systemInfo(): Promise<SystemInfo> {
     return { fullDiskAccess: !location.hash.includes("nofda"), home: HOME, user: "wanpeninsula", devBuild: true };
   },
@@ -452,7 +473,9 @@ export const mock = {
     const out: CleanSummary = { cleaned: [], failed: [], bytesFreed: 0, byCategory: {} };
     for (const [index, t] of targets.entries()) {
       const a = appsReport?.apps.find((x) => x.id === t.id);
-      const size = a ? a.size + a.relatedSize : 0;
+      const size = a
+        ? a.size + a.relatedSize
+        : (appsReport?.leftovers.find((l) => l.id === t.id)?.size ?? appsReport?.installers.find((i) => i.path === t.id)?.size ?? 0);
       onEvent({ status: "started", id: t.id, name: a?.name ?? t.id, size, index, total: targets.length });
       await wait(400);
       if (a?.running) {

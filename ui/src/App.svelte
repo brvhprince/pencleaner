@@ -10,7 +10,8 @@
   import Cleanup from "./modules/Cleanup.svelte";
   import Performance from "./modules/Performance.svelte";
   import Clutter from "./modules/Clutter.svelte";
-  import ComingSoon from "./modules/ComingSoon.svelte";
+  import Activity from "./modules/Activity.svelte";
+  import SmartCare from "./modules/SmartCare.svelte";
   import SpaceLens from "./modules/SpaceLens.svelte";
   import Tools from "./modules/Tools.svelte";
 
@@ -54,8 +55,10 @@
           <Performance />
         {:else if app.module === "tools"}
           <Tools />
-        {:else}
-          <ComingSoon module={current} />
+        {:else if app.module === "smartcare"}
+          <SmartCare />
+        {:else if app.module === "activity"}
+          <Activity />
         {/if}
           {#snippet failed(error, reset)}
             <div class="crash glass" role="alert">

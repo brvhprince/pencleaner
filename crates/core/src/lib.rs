@@ -1,6 +1,7 @@
 //! PenCleaner engine: everything that touches the filesystem lives here, free of any
 //! Tauri dependency so it can be unit-tested and driven from a CLI.
 
+pub mod activity;
 pub mod applications;
 pub mod apps;
 pub mod cleanup;

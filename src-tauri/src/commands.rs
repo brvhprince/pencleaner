@@ -3,6 +3,7 @@
 
 use parking_lot::{Mutex, RwLock};
 use pencleaner_core::cleanup::{self, Category, CleanEvent, CleanSummary, Report};
+use pencleaner_core::activity::{self, Event};
 use pencleaner_core::applications::{self, AppsReport, Target};
 use pencleaner_core::clutter::{self, ClutterReport};
 use pencleaner_core::performance::{self, items::LaunchItem, memory, PerfReport, TaskResult};
@@ -22,6 +23,20 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 type CmdResult<T> = Result<T, String>;
+
+fn activity_log(app: &AppHandle) -> Option<activity::Log> {
+    app.path().app_data_dir().ok().map(|d| activity::Log::new(&d))
+}
+
+/// Notes an action in My Activity. Never fails the action itself.
+fn record(app: &AppHandle, module: &str, action: &str, bytes: u64, items: usize, detail: Option<String>) {
+    if items == 0 && bytes == 0 {
+        return;
+    }
+    if let Some(log) = activity_log(app) {
+        let _ = log.append(&Event::now(module, action, bytes, items as u32, detail));
+    }
+}
 
 #[derive(Default)]
 pub struct AppState {
@@ -156,6 +171,7 @@ pub async fn remove_items(
         let summary = remove::remove_items(&items, mode, |ev| {
             let _ = on_event.send(ev);
         });
+        record(&app, "spacelens", "Moved to the Trash", summary.bytes_freed, summary.removed.len(), None);
         // Keep Space Lens sizes truthful without a rescan.
         let state = app.state::<AppState>();
         if let Some(tree) = state.lens.write().as_mut() {
@@ -210,9 +226,14 @@ pub async fn cleanup_clean(
         let mut guard = state.cleanup.write();
         let report = guard.as_mut().ok_or("Scan again before cleaning")?;
         let ids: HashSet<String> = ids.into_iter().collect();
-        Ok(report.clean(&ids, |ev| {
+        let summary = report.clean(&ids, |ev| {
             let _ = on_event.send(ev);
-        }))
+        });
+        let mut cats: Vec<&String> = summary.by_category.keys().collect();
+        cats.sort();
+        let detail = cats.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", ");
+        record(&app, "cleanup", "Cleaned junk", summary.bytes_freed, summary.cleaned.len(), Some(detail));
+        Ok(summary)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -254,9 +275,11 @@ pub async fn clutter_remove(
         let state = app.state::<AppState>();
         let mut guard = state.clutter.write();
         let report = guard.as_mut().ok_or("Scan again before removing files")?;
-        Ok(report.remove(&ids, |ev| {
+        let summary = report.remove(&ids, |ev| {
             let _ = on_event.send(ev);
-        }))
+        });
+        record(&app, "clutter", "Moved files to the Trash", summary.bytes_freed, summary.removed.len(), None);
+        Ok(summary)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -286,9 +309,13 @@ pub async fn apps_remove(
         let state = app.state::<AppState>();
         let mut guard = state.apps.write();
         let report = guard.as_mut().ok_or("Scan again before removing apps")?;
-        Ok(report.remove(&targets, |ev| {
+        let apps = targets.iter().filter(|t| matches!(t, Target::App(_))).count();
+        let summary = report.remove(&targets, |ev| {
             let _ = on_event.send(ev);
-        }))
+        });
+        let action = if apps > 0 { "Uninstalled apps" } else { "Removed app leftovers" };
+        record(&app, "applications", action, summary.bytes_freed, summary.cleaned.len(), None);
+        Ok(summary)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -336,11 +363,14 @@ pub async fn perf_memory() -> CmdResult<MemorySnapshot> {
 }
 
 #[tauri::command]
-pub async fn perf_run_tasks(ids: Vec<String>, on_start: Channel<String>) -> CmdResult<Vec<TaskResult>> {
+pub async fn perf_run_tasks(app: AppHandle, ids: Vec<String>, on_start: Channel<String>) -> CmdResult<Vec<TaskResult>> {
     tauri::async_runtime::spawn_blocking(move || {
-        performance::run_tasks(&ids, |id| {
+        let results = performance::run_tasks(&ids, |id| {
             let _ = on_start.send(id.to_owned());
-        })
+        });
+        let done: Vec<&str> = results.iter().filter(|r| r.ok).map(|r| r.id.as_str()).collect();
+        record(&app, "performance", "Ran maintenance", 0, done.len(), Some(done.join(", ")));
+        results
     })
     .await
     .map_err(|e| e.to_string())
@@ -367,6 +397,8 @@ pub async fn perf_set_item(app: AppHandle, id: String, enabled: bool) -> CmdResu
     tauri::async_runtime::spawn_blocking(move || {
         let item = perf_item(&app, &id)?;
         performance::items::set_enabled(&item, enabled)?;
+        let action = if enabled { "Switched on a background item" } else { "Switched off a background item" };
+        record(&app, "performance", action, 0, 1, Some(item.name.clone()));
         Ok(refresh_items(&app))
     })
     .await
@@ -378,6 +410,7 @@ pub async fn perf_remove_item(app: AppHandle, id: String) -> CmdResult<Vec<Launc
     tauri::async_runtime::spawn_blocking(move || {
         let item = perf_item(&app, &id)?;
         performance::items::remove(&item)?;
+        record(&app, "performance", "Removed a background item", 0, 1, Some(item.name.clone()));
         Ok(refresh_items(&app))
     })
     .await
@@ -393,10 +426,14 @@ pub struct SnapshotState {
 
 /// Deletes the given Time Machine snapshots (all when empty) and reports what's left.
 #[tauri::command]
-pub async fn perf_delete_snapshots(ids: Vec<String>) -> CmdResult<SnapshotState> {
+pub async fn perf_delete_snapshots(app: AppHandle, ids: Vec<String>) -> CmdResult<SnapshotState> {
     tauri::async_runtime::spawn_blocking(move || {
+        let (count, before) = (performance::snapshots::list().len(), performance::snapshots::purgeable().unwrap_or(0));
         performance::delete_snapshots(&ids)?;
-        Ok(SnapshotState { snapshots: performance::snapshots::list(), purgeable: performance::snapshots::purgeable() })
+        let after = SnapshotState { snapshots: performance::snapshots::list(), purgeable: performance::snapshots::purgeable() };
+        let removed = count.saturating_sub(after.snapshots.len());
+        record(&app, "performance", "Removed Time Machine snapshots", before.saturating_sub(after.purgeable.unwrap_or(0)), removed, None);
+        Ok(after)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -405,4 +442,14 @@ pub async fn perf_delete_snapshots(ids: Vec<String>) -> CmdResult<SnapshotState>
 #[tauri::command]
 pub fn open_login_items_settings() -> CmdResult<()> {
     open(&["x-apple.systempreferences:com.apple.LoginItems-Settings.extension"])
+}
+
+#[tauri::command]
+pub fn activity_list(app: AppHandle) -> Vec<Event> {
+    activity_log(&app).map(|l| l.load()).unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn activity_clear(app: AppHandle) -> CmdResult<()> {
+    activity_log(&app).map_or(Ok(()), |l| l.clear().map_err(|e| e.to_string()))
 }
