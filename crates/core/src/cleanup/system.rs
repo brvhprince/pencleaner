@@ -1,3 +1,7 @@
+// The macOS rules here aren't called on Windows (it has its own in windows.rs); only
+// `old_temp_files` is shared.
+#![cfg_attr(windows, allow(dead_code))]
+
 use super::*;
 
 /// Caches that hold state rather than throwaway data (iCloud, Find My, Wallet…), or ours.
@@ -145,30 +149,34 @@ pub fn logs(cx: &Cx) -> Vec<Group> {
     vec![group("user-logs", Category::System, "User Log Files", "Activity and crash logs written by apps and macOS.", items)]
 }
 
-pub fn temporary(cx: &Cx) -> Vec<Group> {
-    let mut items = Vec::new();
-
-    // $TMPDIR is in use by running apps; anything untouched for 3 days is abandoned.
+/// The temp folder is in use by running apps; anything untouched for 3 days is
+/// abandoned. Shared with the Windows rules (%TEMP%).
+pub(super) fn old_temp_files(cx: &Cx) -> Option<Item> {
     let tmp = std::env::temp_dir();
     let cutoff = cx.now - 3 * DAY;
     let old: Vec<PathBuf> = children(&tmp).into_iter().filter(|p| mtime_of(p).is_some_and(|t| t < cutoff)).collect();
     let size: u64 = old.iter().map(|p| fsutil::disk_usage(p)).sum();
-    if size >= MIN_ITEM {
-        cx.ctl.add(old.len() as u64, size);
-        items.push(Item {
-            id: format!("{}::old", tmp.display()),
-            name: "Old temporary files".into(),
-            detail: Some(format!("{} items untouched for 3+ days", old.len())),
-            path: Some(tmp.to_string_lossy().into_owned()),
-            size,
-            kind: ItemKind::Folder,
-            mode: RemoveMode::Delete,
-            last_activity: None,
-            recommended: true,
-            warning: None,
-            action: Action::Paths(old),
-        });
+    if size < MIN_ITEM {
+        return None;
     }
+    cx.ctl.add(old.len() as u64, size);
+    Some(Item {
+        id: format!("{}::old", tmp.display()),
+        name: "Old temporary files".into(),
+        detail: Some(format!("{} items untouched for 3+ days", old.len())),
+        path: Some(tmp.to_string_lossy().into_owned()),
+        size,
+        kind: ItemKind::Folder,
+        mode: RemoveMode::Delete,
+        last_activity: None,
+        recommended: true,
+        warning: None,
+        action: Action::Paths(old),
+    })
+}
+
+pub fn temporary(cx: &Cx) -> Vec<Group> {
+    let mut items: Vec<Item> = old_temp_files(cx).into_iter().collect();
 
     let saved = cx.p("Library/Saved Application State");
     let entries = children(&saved);

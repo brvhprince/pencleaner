@@ -71,8 +71,9 @@ pub(super) fn find(recs: &[Rec], ctl: &ScanControl) -> Vec<FileSet> {
     let mut by_len: HashMap<u64, Vec<&Rec>> = HashMap::new();
     let mut seen_inodes = HashSet::new();
     for r in recs.iter().filter(|r| r.len >= MIN_DUP) {
-        // Hard links are one file under two names, not duplicates.
-        if seen_inodes.insert((r.dev, r.ino)) {
+        // Hard links are one file under two names, not duplicates. Inode 0 means the
+        // platform didn't say (Windows), so every file counts as its own.
+        if r.ino == 0 || seen_inodes.insert((r.dev, r.ino)) {
             by_len.entry(r.len).or_default().push(r);
         }
     }

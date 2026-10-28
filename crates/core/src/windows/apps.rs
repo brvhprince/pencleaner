@@ -19,7 +19,12 @@ impl AppIndex {
     }
 }
 
-/// Ids of running apps, so their caches aren't pulled out from under them.
+/// Running programs by executable name, lower-case ("chrome.exe"), so their caches
+/// aren't pulled out from under them.
 pub fn running_bundle_ids() -> HashSet<String> {
-    HashSet::new()
+    let Some(out) = crate::fsutil::run_with_timeout("tasklist", &["/fo", "csv", "/nh"], std::time::Duration::from_secs(10)) else {
+        return HashSet::new();
+    };
+    // "chrome.exe","1234","Console","1","123,456 K"
+    out.lines().filter_map(|l| l.split(',').next()).map(|n| n.trim_matches('"').to_ascii_lowercase()).filter(|n| !n.is_empty()).collect()
 }

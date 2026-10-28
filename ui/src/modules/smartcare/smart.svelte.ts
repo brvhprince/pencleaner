@@ -8,15 +8,16 @@ import { app } from "../../lib/state.svelte";
 import { apps, key as appKey } from "../applications/apps.svelte";
 import { cleanup } from "../cleanup/clean.svelte";
 import { perf } from "../performance/perf.svelte";
+import { available } from "../../lib/modules";
 
 export type Step = "cleanup" | "performance" | "applications";
 export type StepState = "waiting" | "working" | "done" | "failed" | "skipped";
 
 export const STEPS: { id: Step; title: string; working: string }[] = [
-  { id: "cleanup", title: "Junk", working: "Looking for junk…" },
-  { id: "performance", title: "Speed", working: "Checking memory and maintenance…" },
-  { id: "applications", title: "Apps", working: "Looking for app leftovers…" },
-];
+  { id: "cleanup" as const, title: "Junk", working: "Looking for junk…" },
+  { id: "performance" as const, title: "Speed", working: "Checking memory and maintenance…" },
+  { id: "applications" as const, title: "Apps", working: "Looking for app leftovers…" },
+].filter((s) => available(s.id));
 
 class SmartCare {
   phase = $state<"home" | "scanning" | "results" | "running" | "done">("home");
@@ -28,8 +29,8 @@ class SmartCare {
   /** Safe junk: what Cleanup recommends, minus anything carrying a warning. */
   junk = $derived<CleanupItem[]>(cleanup.groups.flatMap((g) => g.items.filter((i) => cleanup.isRecommended(i, g) && !i.warning)));
   junkSize = $derived(this.junk.reduce((s, i) => s + i.size, 0));
-  tasks = $derived(perf.recommended);
-  leftovers = $derived(apps.recommendedLeftovers());
+  tasks = $derived(available("performance") ? perf.recommended : []);
+  leftovers = $derived(available("applications") ? apps.recommendedLeftovers() : []);
   leftoverSize = $derived(this.leftovers.reduce((s, t) => s + apps.sizeOf(appKey(t)), 0));
   total = $derived(this.junkSize + this.leftoverSize);
   nothingToDo = $derived(!this.junk.length && !this.tasks.length && !this.leftovers.length);
@@ -50,11 +51,12 @@ class SmartCare {
         this.state.set(id, "failed");
       }
     };
-    await Promise.all([
-      run("cleanup", () => cleanup.scan(true)),
-      run("performance", () => perf.scan()),
-      run("applications", () => apps.scan()),
-    ]);
+    const scans: Record<Step, () => Promise<unknown>> = {
+      cleanup: () => cleanup.scan(true),
+      performance: () => perf.scan(),
+      applications: () => apps.scan(),
+    };
+    await Promise.all(STEPS.map((s) => run(s.id, scans[s.id])));
     this.setPhase("results");
   }
 

@@ -24,7 +24,7 @@
     RefreshCw,
   } from "@lucide/svelte";
   import type { Component } from "svelte";
-  import { MODULE, type ModuleId } from "../lib/modules";
+  import { MODULE, type ModuleId, available, pick } from "../lib/modules";
   import { app } from "../lib/state.svelte";
 
   interface Tool {
@@ -36,11 +36,14 @@
 
   const TOOLS: Tool[] = [
     { title: "Space Lens", text: "Map your disk as bubbles and drill into whatever is biggest.", icon: Orbit, module: "spacelens" },
-    { title: "System Junk", text: "Caches, logs and temporary files that macOS and apps leave behind.", icon: Sparkles, module: "cleanup" },
-    { title: "Developer Junk", text: "node_modules, Rust targets, Gradle and Xcode build output from projects you aren't touching.", icon: Hammer, module: "cleanup" },
+    { title: "System Junk", text: `Caches, logs and temporary files that ${pick("macOS", "Windows")} and apps leave behind.`, icon: Sparkles, module: "cleanup" },
+    { title: "Developer Junk", text: `node_modules, Rust targets, Gradle${pick(" and Xcode", "")} build output from projects you aren't touching.`, icon: Hammer, module: "cleanup" },
     { title: "AI Clutter", text: "Local models and caches from Ollama, LM Studio and Hugging Face.", icon: Bot, module: "cleanup" },
-    { title: "Mail Attachments", text: "Copies of attachments Mail saved locally.", icon: Mail, module: "cleanup" },
-    { title: "Trash Bins", text: "Empty the Trash on every connected drive at once.", icon: Trash, module: "cleanup" },
+    ...pick<Tool[]>([{ title: "Mail Attachments", text: "Copies of attachments Mail saved locally.", icon: Mail, module: "cleanup" }], []),
+    pick<Tool>(
+      { title: "Trash Bins", text: "Empty the Trash on every connected drive at once.", icon: Trash, module: "cleanup" },
+      { title: "Recycle Bin", text: "Empty the Recycle Bin on every drive at once.", icon: Trash, module: "cleanup" },
+    ),
     { title: "Malware Scan", text: "Checks apps and background items against Apple's own XProtect signatures, offline.", icon: Bug, module: "protection" },
     { title: "Privacy", text: "Clear browsing history, cookies and recent-items lists. Never passwords or bookmarks.", icon: EyeOff, module: "protection" },
     { title: "App Permissions", text: "See which apps can use your camera, mic and screen, and revoke the ones you don't want.", icon: KeyRound, module: "protection" },
@@ -60,7 +63,7 @@
 
   let query = $state("");
   const shown = $derived(
-    TOOLS.filter((t) => `${t.title} ${t.text}`.toLowerCase().includes(query.trim().toLowerCase())),
+    TOOLS.filter((t) => available(t.module)).filter((t) => `${t.title} ${t.text}`.toLowerCase().includes(query.trim().toLowerCase())),
   );
 </script>
 

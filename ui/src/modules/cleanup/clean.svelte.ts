@@ -4,6 +4,7 @@ import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { Bot, Hammer, Mail, Sparkles, Trash } from "@lucide/svelte";
 import { api, type Category, type CleanSummary, type CleanupGroup, type CleanupItem, type CleanupReport, type Progress } from "../../lib/api";
 import { bytes } from "../../lib/format";
+import { pick } from "../../lib/modules";
 import { app } from "../../lib/state.svelte";
 
 export interface CategoryMeta {
@@ -15,10 +16,10 @@ export interface CategoryMeta {
 
 export const CATEGORIES: CategoryMeta[] = [
   { id: "system", title: "System Junk", blurb: "Caches, logs and temporary files", icon: Sparkles },
-  { id: "developer", title: "Developer Junk", blurb: "Build output, package caches, simulators", icon: Hammer },
+  { id: "developer", title: "Developer Junk", blurb: pick("Build output, package caches, simulators", "Build output and package caches"), icon: Hammer },
   { id: "ai", title: "AI Clutter", blurb: "Local models and AI tool caches", icon: Bot },
-  { id: "mail", title: "Mail Attachments", blurb: "Attachments Mail stored locally", icon: Mail },
-  { id: "trash", title: "Trash Bins", blurb: "Everything waiting in the Trash", icon: Trash },
+  ...pick<CategoryMeta[]>([{ id: "mail", title: "Mail Attachments", blurb: "Attachments Mail stored locally", icon: Mail }], []),
+  { id: "trash", title: pick("Trash Bins", "Recycle Bin"), blurb: pick("Everything waiting in the Trash", "Everything waiting in the Recycle Bin"), icon: Trash },
 ];
 
 type Phase = "home" | "scanning" | "results" | "cleaning" | "done";

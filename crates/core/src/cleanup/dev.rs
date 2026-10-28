@@ -1,3 +1,6 @@
+// Xcode, simulators and VM rules are macOS-only; Windows doesn't call them.
+#![cfg_attr(windows, allow(dead_code))]
+
 use super::*;
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
@@ -54,7 +57,8 @@ const SUBPROJECT_DIRS: &[&str] = &[
 ];
 
 /// Never descended into at the top of the home folder.
-const HOME_SKIP: &[&str] = &["Library", "Pictures", "Music", "Movies", "Applications", "Public"];
+// AppData (Windows) is huge and never holds projects.
+const HOME_SKIP: &[&str] = &["Library", "Pictures", "Music", "Movies", "Applications", "Public", "AppData"];
 
 /// Package-style folders that are never project trees.
 pub(crate) const BUNDLE_EXTS: &[&str] = &["app", "photoslibrary", "musiclibrary", "tvlibrary", "fcpbundle", "logicx", "imovielibrary", "xcarchive", "framework", "bundle"];
@@ -499,7 +503,7 @@ mod tests {
         let mut got: Vec<(String, String)> = found
             .into_inner()
             .into_iter()
-            .map(|f| (file_name(&f.project), f.artifact.strip_prefix(h).unwrap().display().to_string()))
+            .map(|f| (file_name(&f.project), f.artifact.strip_prefix(h).unwrap().display().to_string().replace('\\', "/")))
             .collect();
         got.sort();
         assert_eq!(got, [("app".into(), "code/app/node_modules".into()), ("app".into(), "code/app/src-tauri/target".into())]);

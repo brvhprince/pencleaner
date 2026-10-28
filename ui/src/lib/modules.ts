@@ -75,7 +75,25 @@ const theme = (from: string, mid: string, to: string, glow: string, accent: stri
   surface: mid,
 });
 
-export const MODULES: ModuleDef[] = [
+export type Platform = "macos" | "windows";
+
+/** Which OS this is: WebView2 says "Windows NT" in its user agent. Previews can fake it with #platform=windows. */
+export const PLATFORM: Platform =
+  /Windows/.test(navigator.userAgent) || location.hash.includes("platform=windows") ? "windows" : "macos";
+
+/** Modules whose engine is macOS-only so far. */
+const MAC_ONLY: ModuleId[] = ["protection", "performance", "applications"];
+
+/** The macOS or the Windows wording/value. */
+export const pick = <T>(mac: T, win: T): T => (PLATFORM === "windows" ? win : mac);
+/** "Mac" or "PC", for sentences like "keep your Mac running smoothly". */
+export const MACHINE = pick("Mac", "PC");
+
+export function available(id: ModuleId) {
+  return PLATFORM === "macos" || !MAC_ONLY.includes(id);
+}
+
+const ALL_MODULES: ModuleDef[] = [
   {
     id: "smartcare",
     title: "Smart Care",
@@ -92,15 +110,15 @@ export const MODULES: ModuleDef[] = [
   {
     id: "cleanup",
     title: "Cleanup",
-    tagline: "Clear out junk to reclaim space and keep your Mac running smoothly.",
+    tagline: `Clear out junk to reclaim space and keep your ${MACHINE} running smoothly.`,
     icon: SprayCan,
     illustration: "housekeeping",
     features: [
       { icon: Sparkles, label: "System Junk" },
       { icon: Hammer, label: "Developer Junk" },
       { icon: Bot, label: "AI Clutter" },
-      { icon: Mail, label: "Mail Attachments" },
-      { icon: Trash, label: "Trash Bins" },
+      ...pick([{ icon: Mail, label: "Mail Attachments" }], []),
+      { icon: Trash, label: pick("Trash Bins", "Recycle Bin") },
     ],
     theme: theme("#0c2614", "#1d5228", "#3d8a39", "#58a849", "#6fcf5a", "#9be686"),
   },
@@ -185,7 +203,7 @@ export const MODULES: ModuleDef[] = [
   {
     id: "activity",
     title: "My Activity",
-    tagline: "Everything PenCleaner has done for your Mac.",
+    tagline: `Everything PenCleaner has done for your ${MACHINE}.`,
     icon: ChartLine,
     illustration: "insights",
     features: [],
@@ -204,4 +222,7 @@ export const MODULES: ModuleDef[] = [
   },
 ];
 
-export const MODULE = Object.fromEntries(MODULES.map((m) => [m.id, m])) as Record<ModuleId, ModuleDef>;
+/** The modules this platform has, in sidebar order. */
+export const MODULES = ALL_MODULES.filter((m) => available(m.id));
+/** Every module by id, including other platforms' (My Activity may mention them). */
+export const MODULE = Object.fromEntries(ALL_MODULES.map((m) => [m.id, m])) as Record<ModuleId, ModuleDef>;

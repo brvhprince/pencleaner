@@ -3,7 +3,68 @@
 
 use std::path::{Component, Path};
 
+/// Checks every platform shares: absolute and normalised.
+fn basics(path: &Path) -> Option<&'static str> {
+    if !path.is_absolute() {
+        return Some("Only absolute paths can be removed");
+    }
+    if path.components().any(|c| matches!(c, Component::ParentDir | Component::CurDir)) {
+        return Some("Path is not normalized");
+    }
+    None
+}
+
+/// Folders in a Windows profile that Windows creates and apps expect to exist.
+#[cfg(windows)]
+const WIN_HOME_STANDARD: &[&str] = &[
+    "AppData", "Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos", "OneDrive", "Favorites", "Contacts", "Links",
+    "Saved Games", "Searches", "3D Objects",
+];
+
+/// Trees under the system drive where nothing should ever be removed by a cleaner.
+#[cfg(windows)]
+const WIN_SYSTEM_TREES: &[&str] = &[
+    "Windows", "Program Files", "Program Files (x86)", "ProgramData", "Recovery", "System Volume Information", "$Recycle.Bin", "Boot",
+];
+
+/// Windows rules: system folders, every profile, and the profile's own skeleton. Paths
+/// compare case-insensitively, as Windows does.
+#[cfg(windows)]
+pub fn protection(path: &Path, home: &Path) -> Option<&'static str> {
+    if let Some(why) = basics(path) {
+        return Some(why);
+    }
+    let lower = |p: &Path| p.to_string_lossy().to_lowercase().replace('/', "\\");
+    let (p, h) = (lower(path), lower(home));
+    let parts: Vec<&str> = p.trim_end_matches('\\').split('\\').collect();
+    // ["c:", "windows", …]: a drive root, or anything directly on it, is off limits.
+    if parts.len() <= 2 {
+        return Some("Top-level system folder");
+    }
+    if WIN_SYSTEM_TREES.iter().any(|t| parts[1] == t.to_lowercase()) {
+        return Some("Part of Windows");
+    }
+    if parts[1] == "users" && parts.len() == 3 {
+        return Some("User profile folder");
+    }
+    if p.trim_end_matches('\\') == h.trim_end_matches('\\') {
+        return Some("Your profile folder");
+    }
+    if let Some(rel) = p.strip_prefix(&format!("{}\\", h.trim_end_matches('\\'))) {
+        let rel: Vec<&str> = rel.split('\\').filter(|s| !s.is_empty()).collect();
+        if rel.len() == 1 && WIN_HOME_STANDARD.iter().any(|s| rel[0] == s.to_lowercase()) {
+            return Some("Standard Windows folder");
+        }
+        // AppData, AppData\Local, and AppData\Local\<app> as a whole.
+        if rel.first() == Some(&"appdata") && rel.len() <= 3 {
+            return Some("AppData folder used by Windows and apps");
+        }
+    }
+    None
+}
+
 /// Folders in a home directory that macOS creates and other apps expect to exist.
+#[cfg(target_os = "macos")]
 const HOME_STANDARD: &[&str] = &[
     "Applications",
     "Desktop",
@@ -18,6 +79,7 @@ const HOME_STANDARD: &[&str] = &[
 ];
 
 /// Trees where nothing should ever be removed by a cleaner.
+#[cfg(target_os = "macos")]
 const SYSTEM_TREES: &[&str] = &[
     "/System",
     "/bin",
@@ -32,15 +94,14 @@ const SYSTEM_TREES: &[&str] = &[
 ];
 
 /// Exceptions inside `SYSTEM_TREES`.
+#[cfg(target_os = "macos")]
 const SYSTEM_ALLOWED: &[&str] = &["/usr/local"];
 
 /// Returns why `path` must not be removed, or None when it may be.
+#[cfg(target_os = "macos")]
 pub fn protection(path: &Path, home: &Path) -> Option<&'static str> {
-    if !path.is_absolute() {
-        return Some("Only absolute paths can be removed");
-    }
-    if path.components().any(|c| matches!(c, Component::ParentDir | Component::CurDir)) {
-        return Some("Path is not normalized");
+    if let Some(why) = basics(path) {
+        return Some(why);
     }
     let depth = path.components().count(); // "/" counts as one component
     if depth <= 2 {
@@ -86,6 +147,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn protects_system_and_home_roots() {
         let home = p("/Users/me");
         for bad in [
@@ -109,6 +171,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn allows_ordinary_content() {
         let home = p("/Users/me");
         for ok in [
@@ -119,6 +182,44 @@ mod tests {
             "/Applications/Xcode.app",
             "/usr/local/share/dotnet",
             "/Library/Caches/com.foo",
+        ] {
+            assert!(protection(p(ok), home).is_none(), "{ok} should be removable");
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_protects_system_and_profile_skeleton() {
+        let home = p(r"C:\Users\me");
+        for bad in [
+            r"C:\",
+            r"C:\Windows",
+            r"C:\Windows\System32\drivers",
+            r"c:\program files\App",
+            r"C:\ProgramData\Microsoft",
+            r"C:\Users",
+            r"C:\Users\other",
+            r"C:\Users\me",
+            r"C:\Users\me\Documents",
+            r"C:\Users\me\AppData\Local",
+            r"C:\Users\me\AppData\Local\Google",
+            r"D:\Games",
+            r"relative\path",
+        ] {
+            assert!(protection(p(bad), home).is_some(), "{bad} should be protected");
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_allows_ordinary_content() {
+        let home = p(r"C:\Users\me");
+        for ok in [
+            r"C:\Users\me\AppData\Local\Google\Chrome\User Data\Default\Cache\data_0",
+            r"C:\Users\me\AppData\Local\Temp\setup123",
+            r"C:\Users\me\Documents\old.zip",
+            r"C:\Users\me\code\app\node_modules",
+            r"D:\Games\old-mod",
         ] {
             assert!(protection(p(ok), home).is_none(), "{ok} should be removable");
         }

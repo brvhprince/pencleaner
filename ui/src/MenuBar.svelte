@@ -5,6 +5,7 @@
   import { api, inTauri, type ActivityEvent, type CareStatus, type TrashedApp, type Vitals } from "./lib/api";
   import { plural } from "./lib/format";
   import { ago, bytes } from "./lib/format";
+  import { available } from "./lib/modules";
 
   let v = $state<Vitals | null>(null);
   let xprotect = $state<string | null>(null);
@@ -120,20 +121,20 @@
       return { icon: Trash, title: `The Trash holds ${bytes(v.trash)}`, text: "Emptying it gives that space back.", action: confirmTrash ? `Empty ${bytes(v.trash)} for good?` : "Empty Trash", run: emptyTrash };
     }
     const temp = v?.sensors?.cpuCelsius;
-    if (temp != null && temp >= 90) {
+    if (temp != null && temp >= 90 && available("performance")) {
       return { icon: Thermometer, title: "Your Mac is running hot", text: `The CPU is at ${Math.round(temp)} °C. See what's keeping it busy.`, action: "Open Performance", run: () => api.showMain("performance") };
     }
     if (care?.due) {
       const since = care.lastRun ? `Last run ${ago(care.lastRun)}.` : `You asked for one every ${care.everyDays === 1 ? "day" : `${care.everyDays} days`}.`;
       return { icon: Sparkles, title: "Smart Care is due", text: since, action: "Run Smart Care", run: () => api.showMain("smartcare") };
     }
-    if (v && v.memoryLevel !== "normal") {
+    if (v && v.memoryLevel !== "normal" && available("performance")) {
       return { icon: MemoryStick, title: "Memory is under pressure", text: "See what's using it and free some up.", action: "Open Memory", run: () => api.showMain("performance") };
     }
     if (!lastClean || now() - lastClean.at > 7 * DAY) {
       return { icon: Sparkles, title: "Time for a quick tidy", text: lastClean ? `Last cleaned ${ago(lastClean.at)}.` : "PenCleaner hasn't cleaned anything yet.", action: "Run Smart Care", run: () => api.showMain("smartcare") };
     }
-    if (!lastProtection || now() - lastProtection.at > 14 * DAY) {
+    if (available("protection") && (!lastProtection || now() - lastProtection.at > 14 * DAY)) {
       return { icon: ShieldCheck, title: "Check for threats", text: "A Protection scan takes about a minute and stays on this Mac.", action: "Scan Now", run: () => api.showMain("protection") };
     }
     return { icon: Sparkles, title: "All good", text: `Cleaned ${ago(lastClean.at)}. Nothing needs you right now.`, action: "Open PenCleaner", run: () => api.showMain() };
@@ -192,6 +193,7 @@
     <span class="mac"><Laptop size={30} strokeWidth={1.5} /></span>
   </header>
 
+  {#if available("protection")}
   <button class="card protect" onclick={() => api.showMain("protection")}>
     <span class="row" class:on={watcher}>
       {#if watcher}<ShieldCheck size={18} />{:else}<ShieldOff size={18} />{/if}
@@ -202,6 +204,7 @@
       XProtect {xprotect ? `v${xprotect}` : "signatures"} · {lastProtection ? `last scan ${ago(lastProtection.at)}` : "not scanned yet"}
     </span>
   </button>
+  {/if}
 
   {#if v}
     <div class="grid">
@@ -217,7 +220,7 @@
         <span class="big" class:warn={v.memoryLevel !== "normal"}>{v.memoryPressure}%</span>
         <span class="sub">pressure · {bytes(v.swapUsed)} swap</span>
         <div class="bar"><div style:width="{v.memoryPressure}%" class:hot={v.memoryLevel !== "normal"}></div></div>
-        <button class="link" onclick={() => api.showMain("performance")}>Free Up</button>
+        {#if available("performance")}<button class="link" onclick={() => api.showMain("performance")}>Free Up</button>{/if}
       </div>
       {#if v.battery}
         {@const b = v.battery}

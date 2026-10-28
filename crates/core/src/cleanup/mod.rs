@@ -6,9 +6,13 @@
 
 mod ai;
 pub(crate) mod dev;
+#[cfg(target_os = "macos")]
 mod mail;
 mod system;
+#[cfg(target_os = "macos")]
 mod trash_bins;
+#[cfg(windows)]
+mod windows;
 
 use crate::apps::{self, AppIndex};
 use crate::fsutil::{self, home_dir};
@@ -150,7 +154,7 @@ impl Cx<'_> {
 
     pub fn tilde(&self, path: &Path) -> String {
         match path.strip_prefix(&self.home) {
-            Ok(rel) => format!("~/{}", rel.display()),
+            Ok(rel) => format!("~{}{}", std::path::MAIN_SEPARATOR, rel.display()),
             Err(_) => path.display().to_string(),
         }
     }
@@ -220,6 +224,7 @@ pub fn group(id: &'static str, category: Category, title: &'static str, descript
 
 type Rule = fn(&Cx) -> Vec<Group>;
 
+#[cfg(target_os = "macos")]
 fn rules(category: Category) -> &'static [Rule] {
     match category {
         Category::System => &[system::user_caches, system::logs, system::temporary, system::ios],
@@ -227,6 +232,19 @@ fn rules(category: Category) -> &'static [Rule] {
         Category::Ai => &[ai::models, ai::tool_caches],
         Category::Mail => &[mail::attachments],
         Category::Trash => &[trash_bins::trash_bins],
+    }
+}
+
+/// Windows: its own system rules; developer and AI caches mostly live in the same
+/// home-folder places as on the Mac, so those rules are shared. No Mail.
+#[cfg(windows)]
+fn rules(category: Category) -> &'static [Rule] {
+    match category {
+        Category::System => &[windows::user_caches, windows::logs, windows::temporary],
+        Category::Developer => &[dev::projects, dev::package_caches, dev::ide_caches],
+        Category::Ai => &[ai::models, ai::tool_caches],
+        Category::Mail => &[],
+        Category::Trash => &[windows::recycle_bin],
     }
 }
 
