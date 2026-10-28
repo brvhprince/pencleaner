@@ -103,9 +103,16 @@ struct Ctx<'a> {
     inodes: InodeSet,
     devices: Vec<u64>,
     denied: AtomicU64,
+    /// Skip bulk reads (see `scan`).
+    classic: bool,
 }
 
 pub fn scan(root: &Path, ctl: &ScanControl) -> Result<ScanTree> {
+    // PENCLEANER_CLASSIC_WALK=1: the stat-per-entry walk, for comparing speed.
+    scan_with(root, ctl, std::env::var_os("PENCLEANER_CLASSIC_WALK").is_some())
+}
+
+fn scan_with(root: &Path, ctl: &ScanControl, classic: bool) -> Result<ScanTree> {
     let started = Instant::now();
     fsutil::set_observer_io_policy();
     let md = fs::metadata(root).map_err(|e| Error::io(root, e))?;
@@ -116,14 +123,15 @@ pub fn scan(root: &Path, ctl: &ScanControl) -> Result<ScanTree> {
             devices.push(data.dev());
         }
     }
-    let ctx = Ctx { ctl, inodes: InodeSet::default(), devices, denied: AtomicU64::new(0) };
+    let ctx = Ctx { ctl, inodes: InodeSet::default(), devices, denied: AtomicU64::new(0), classic };
 
-    // APFS metadata calls are the bottleneck: past ~8 threads time barely improves
-    // while kernel CPU doubles (measured on 4.5M items: 4→62s, 8→42s, 16→39s, 32→41s).
+    // APFS metadata lookups in the kernel are the bottleneck (~97% of CPU time). With bulk
+    // reads, one thread per logical core is best (4.4M items, 16-core i9: stat per entry
+    // on 8 threads 66s; bulk on 8 threads 56s, 16 → 49s, 32 → 51s).
     let threads = std::env::var("PENCLEANER_THREADS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or_else(|| (std::thread::available_parallelism().map_or(8, |n| n.get()) / 2).max(4));
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(8, |n| n.get()).max(4));
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .stack_size(16 * 1024 * 1024)
@@ -149,34 +157,33 @@ fn walk(path: &Path, name: Box<str>, own_size: u64, ctx: &Ctx) -> DirNode {
         return node;
     }
     ctx.ctl.set_current(path);
-    let rd = match fs::read_dir(path) {
-        Ok(rd) => rd,
-        Err(_) => {
+    let mut subdirs = Vec::new();
+    let (mut items, mut file_bytes) = (0u64, 0u64);
+    // One getattrlistbulk call covers many entries; a stat per entry was the bottleneck.
+    let bulk = if ctx.classic { Err(std::io::ErrorKind::Unsupported.into()) } else { fsutil::read_dir_bulk(path, |e| {
+        items += 1;
+        if e.is_dir {
+            let p = path.join(e.name);
+            if !ctx.devices.contains(&e.dev) || e.dataless || SKIP.iter().any(|s| p == Path::new(s)) {
+                return;
+            }
+            let name: Box<str> = e.name.to_string_lossy().into();
+            subdirs.push((p, name, e.allocated));
+        } else if ctx.inodes.first_sighting_of(e.dev, e.ino, e.nlink) {
+            file_bytes += e.allocated;
+        }
+    }) };
+    if bulk.is_err() {
+        // Not readable, or a filesystem without bulk reads: retry the classic way.
+        items = 0;
+        file_bytes = 0;
+        subdirs.clear();
+        let Ok(rd) = fs::read_dir(path) else {
             node.denied = true;
             ctx.denied.fetch_add(1, Ordering::Relaxed);
             return node;
-        }
-    };
-
-    let mut subdirs = Vec::new();
-    let (mut items, mut file_bytes) = (0u64, 0u64);
-    for entry in rd.flatten() {
-        // DirEntry::metadata does not follow symlinks.
-        let Ok(md) = entry.metadata() else { continue };
-        items += 1;
-        if md.is_dir() {
-            let p = entry.path();
-            if !ctx.devices.contains(&md.dev())
-                || fsutil::is_dataless(&md)
-                || SKIP.iter().any(|s| p == Path::new(s))
-            {
-                continue;
-            }
-            let name: Box<str> = entry.file_name().to_string_lossy().into();
-            subdirs.push((p, name, fsutil::allocated(&md)));
-        } else if ctx.inodes.first_sighting(&md) {
-            file_bytes += fsutil::allocated(&md);
-        }
+        };
+        classic(rd, ctx, &mut subdirs, &mut items, &mut file_bytes);
     }
     ctx.ctl.add(items, file_bytes);
 
@@ -191,6 +198,25 @@ fn walk(path: &Path, name: Box<str>, own_size: u64, ctx: &Ctx) -> DirNode {
     node.items = items + children.iter().map(|c| c.items).sum::<u64>();
     node.children = children;
     node
+}
+
+/// The stat-per-entry listing, for filesystems that refuse bulk reads.
+fn classic(rd: fs::ReadDir, ctx: &Ctx, subdirs: &mut Vec<(PathBuf, Box<str>, u64)>, items: &mut u64, file_bytes: &mut u64) {
+    for entry in rd.flatten() {
+        // DirEntry::metadata does not follow symlinks.
+        let Ok(md) = entry.metadata() else { continue };
+        *items += 1;
+        if md.is_dir() {
+            let p = entry.path();
+            if !ctx.devices.contains(&md.dev()) || fsutil::is_dataless(&md) || SKIP.iter().any(|s| p == Path::new(s)) {
+                continue;
+            }
+            let name: Box<str> = entry.file_name().to_string_lossy().into();
+            subdirs.push((p, name, fsutil::allocated(&md)));
+        } else if ctx.inodes.first_sighting(&md) {
+            *file_bytes += fsutil::allocated(&md);
+        }
+    }
 }
 
 fn display_name(path: &Path) -> String {
@@ -366,6 +392,24 @@ mod tests {
         assert_eq!(tree.root.size, before - big);
         assert!(tree.node(&root.join("big")).is_none());
         assert_eq!(tree.root.items, 3);
+    }
+
+    #[test]
+    fn bulk_listing_matches_stat_per_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        write(&r.join("a/one.bin"), 40);
+        write(&r.join("a/b/two.bin"), 120);
+        write(&r.join("c/three.bin"), 8);
+        std::fs::hard_link(r.join("a/one.bin"), r.join("c/one-again.bin")).unwrap();
+        std::os::unix::fs::symlink(r.join("a"), r.join("link-to-a")).unwrap();
+        std::fs::create_dir(r.join("empty")).unwrap();
+
+        let ctl = ScanControl::new();
+        let bulk = scan_with(r, &ctl, false).unwrap().summary();
+        let classic = scan_with(r, &ctl, true).unwrap().summary();
+        assert_eq!((bulk.size, bulk.items), (classic.size, classic.items));
+        assert!(bulk.size >= 168 * 1024, "hard link counted once, symlink not followed");
     }
 
     #[test]

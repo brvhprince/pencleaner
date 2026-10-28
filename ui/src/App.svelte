@@ -4,6 +4,7 @@
   import { inTauri } from "./lib/api";
   import About from "./lib/components/About.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
+  import { preloadIllustrations } from "./lib/illustrations/Illustration.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import Toasts from "./lib/components/Toasts.svelte";
   import { MODULE, MODULES } from "./lib/modules";
@@ -39,6 +40,8 @@
   });
 
   onMount(() => {
+    // The art the app actually shows, fetched now so modules open without a blank frame.
+    preloadIllustrations([...MODULES.map((m) => m.illustration), "default", "trash", "permissions", "housekeeping", "achievements"]);
     // Browser preview only: #module=tools etc. jumps straight to a module.
     const wanted = new URLSearchParams(location.hash.slice(1)).get("module");
     if (!inTauri && wanted && wanted in MODULE) app.go(wanted as keyof typeof MODULE);

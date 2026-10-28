@@ -1,0 +1,46 @@
+# Lint, type-check and test on every push to main and every pull request.
+# macOS runners count 10x against a private repo's free Actions minutes, so docs-only
+# changes are skipped and a newer push cancels the run it replaces.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "LICENSE", "shots/**"]
+  pull_request:
+    paths-ignore: ["**.md", "LICENSE", "shots/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Type-check the UI
+        run: pnpm check
+      # The app crate embeds the built UI, so it has to exist before Rust compiles.
+      - name: Build the UI
+        run: pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked

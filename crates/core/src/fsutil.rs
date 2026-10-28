@@ -119,12 +119,152 @@ impl Default for InodeSet {
 impl InodeSet {
     /// Returns true the first time an inode is seen.
     pub fn first_sighting(&self, md: &Metadata) -> bool {
-        if md.nlink() <= 1 {
+        self.first_sighting_of(md.dev(), md.ino(), md.nlink())
+    }
+
+    pub fn first_sighting_of(&self, dev: u64, ino: u64, nlink: u64) -> bool {
+        if nlink <= 1 {
             return true;
         }
-        let key = (md.dev(), md.ino());
-        self.shards[(md.ino() % 64) as usize].lock().insert(key)
+        self.shards[(ino % 64) as usize].lock().insert((dev, ino))
     }
+}
+
+/// One directory entry from `read_dir_bulk`, with what a size scan needs.
+pub struct BulkEntry<'a> {
+    pub name: &'a std::ffi::OsStr,
+    pub is_dir: bool,
+    pub dev: u64,
+    pub ino: u64,
+    pub nlink: u64,
+    /// Allocated bytes (a directory's own, not its contents; 0 on APFS).
+    pub allocated: u64,
+    /// iCloud placeholder (see `is_dataless`).
+    pub dataless: bool,
+}
+
+/// Lists a directory with `getattrlistbulk`: names, types and sizes for many entries per
+/// system call, instead of a `stat` per entry. Doesn't follow symlinks. Errors mean the
+/// directory couldn't be read at all.
+pub fn read_dir_bulk(dir: &Path, mut each: impl FnMut(BulkEntry)) -> std::io::Result<()> {
+    use std::ffi::{CString, OsStr};
+    use std::os::unix::ffi::OsStrExt;
+
+    const VDIR: u32 = 2;
+    // <sys/attr.h>; not exposed by the libc crate. Comes right after the returned set.
+    const ATTR_CMN_ERROR: u32 = 0x2000_0000;
+    let c = CString::new(dir.as_os_str().as_bytes()).map_err(|_| std::io::ErrorKind::InvalidInput)?;
+    let fd = unsafe { libc::open(c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    struct Fd(i32);
+    impl Drop for Fd {
+        fn drop(&mut self) {
+            unsafe { libc::close(self.0) };
+        }
+    }
+    let _guard = Fd(fd);
+
+    let mut attrs = libc::attrlist {
+        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+        reserved: 0,
+        commonattr: libc::ATTR_CMN_RETURNED_ATTRS
+            | libc::ATTR_CMN_NAME
+            | ATTR_CMN_ERROR
+            | libc::ATTR_CMN_DEVID
+            | libc::ATTR_CMN_OBJTYPE
+            | libc::ATTR_CMN_FLAGS
+            | libc::ATTR_CMN_FILEID,
+        volattr: 0,
+        dirattr: libc::ATTR_DIR_ALLOCSIZE,
+        fileattr: libc::ATTR_FILE_LINKCOUNT | libc::ATTR_FILE_ALLOCSIZE,
+        forkattr: 0,
+    };
+    thread_local! {
+        static BUF: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(vec![0u8; 256 * 1024]);
+    }
+    BUF.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        loop {
+            let n = unsafe {
+                libc::getattrlistbulk(fd, (&mut attrs as *mut libc::attrlist).cast(), buf.as_mut_ptr().cast(), buf.len(), 0)
+            };
+            if n < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if n == 0 {
+                return Ok(());
+            }
+            // Entries are packed one after another; within one, attributes follow the
+            // returned set in a fixed order, 4-byte aligned (man getattrlistbulk).
+            let mut entry = 0usize;
+            for _ in 0..n {
+                let base = entry;
+                let rd_u32 = |at: usize| u32::from_ne_bytes(buf[at..at + 4].try_into().unwrap());
+                let rd_u64 = |at: usize| u64::from_ne_bytes(buf[at..at + 8].try_into().unwrap());
+                let len = rd_u32(base) as usize;
+                entry += len;
+                let mut at = base + 4;
+                // attribute_set_t: common, vol, dir, file, fork.
+                let returned_common = rd_u32(at);
+                let returned_dir = rd_u32(at + 8);
+                let returned_file = rd_u32(at + 12);
+                at += std::mem::size_of::<libc::attribute_set_t>();
+                if returned_common & ATTR_CMN_ERROR != 0 {
+                    let err = rd_u32(at);
+                    at += 4;
+                    if err != 0 {
+                        continue; // this one entry couldn't be read; skip it like a failed stat
+                    }
+                }
+                let mut name: &OsStr = OsStr::new("");
+                if returned_common & libc::ATTR_CMN_NAME != 0 {
+                    let off = i32::from_ne_bytes(buf[at..at + 4].try_into().unwrap()) as isize;
+                    let nlen = rd_u32(at + 4) as usize;
+                    let start = (at as isize + off) as usize;
+                    // Length includes the trailing NUL.
+                    name = OsStr::from_bytes(&buf[start..start + nlen.saturating_sub(1)]);
+                    at += 8;
+                }
+                let mut dev = 0u64;
+                if returned_common & libc::ATTR_CMN_DEVID != 0 {
+                    // Same widening as std's MetadataExt::dev (st_dev is an i32).
+                    dev = i32::from_ne_bytes(buf[at..at + 4].try_into().unwrap()) as u64;
+                    at += 4;
+                }
+                let mut objtype = 0u32;
+                if returned_common & libc::ATTR_CMN_OBJTYPE != 0 {
+                    objtype = rd_u32(at);
+                    at += 4;
+                }
+                let mut flags = 0u32;
+                if returned_common & libc::ATTR_CMN_FLAGS != 0 {
+                    flags = rd_u32(at);
+                    at += 4;
+                }
+                let mut ino = 0u64;
+                if returned_common & libc::ATTR_CMN_FILEID != 0 {
+                    ino = rd_u64(at);
+                    at += 8;
+                }
+                let mut allocated = 0u64;
+                if returned_dir & libc::ATTR_DIR_ALLOCSIZE != 0 {
+                    allocated = rd_u64(at);
+                    at += 8;
+                }
+                let mut nlink = 1u64;
+                if returned_file & libc::ATTR_FILE_LINKCOUNT != 0 {
+                    nlink = rd_u32(at) as u64;
+                    at += 4;
+                }
+                if returned_file & libc::ATTR_FILE_ALLOCSIZE != 0 {
+                    allocated = rd_u64(at);
+                }
+                each(BulkEntry { name, is_dir: objtype == VDIR, dev, ino, nlink, allocated, dataless: flags & SF_DATALESS != 0 });
+            }
+        }
+    })
 }
 
 /// Recursive allocated size of a path, never following symlinks.

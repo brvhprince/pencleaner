@@ -17,6 +17,16 @@ fn main() {
         s.denied,
         s.elapsed_ms
     );
+    fn denied(n: &space_lens::DirNode, at: &std::path::Path) {
+        let here = at.join(&*n.name);
+        if n.denied {
+            println!("unreadable: {}", here.display());
+        }
+        for c in &n.children {
+            denied(c, &here);
+        }
+    }
+    denied(&tree.root, root.parent().unwrap_or(&root));
     let listing = tree.list(&root, &fsutil::home_dir()).unwrap();
     for e in listing.entries.iter().take(15) {
         println!("{:>10.2} GB  {:?}  {}", e.size as f64 / 1e9, e.kind, e.name);

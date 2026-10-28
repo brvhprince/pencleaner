@@ -228,7 +228,9 @@ mod tests {
         assert_eq!(signer(Path::new("/usr/bin/curl"), true), Signer::Apple);
         assert_eq!(signer(Path::new("/System/Applications/Calculator.app"), true), Signer::Apple);
         if Path::new("/Applications/Xcode.app").exists() {
-            assert!(matches!(signer(Path::new("/Applications/Xcode.app"), true), Signer::Developer { notarized: Some(true), .. }));
+            // App Store copies are signed for distribution; the developer download (as on
+            // CI machines) by Apple itself. Either way it must come out trusted.
+            assert!(matches!(signer(Path::new("/Applications/Xcode.app"), true), Signer::Apple | Signer::Developer { notarized: Some(true), .. }));
         }
         let dir = tempfile::tempdir().unwrap();
         let s = dir.path().join("x.sh");

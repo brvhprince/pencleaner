@@ -240,9 +240,16 @@
       </div>
       <div class="card tile">
         <span class="t"><Trash size={15} /> Trash</span>
-        <span class="big">{v.trash ? bytes(v.trash) : "Empty"}</span>
-        {#if v.trash}
-          <button class="link" class:danger={confirmTrash} disabled={emptying} onclick={emptyTrash}>{confirmTrash ? "Empty for good?" : "Empty"}</button>
+        {#if v.trash && confirmTrash}
+          <!-- The question needs more room than the corner link has. -->
+          <span class="sub warn">{bytes(v.trash)}, can't be undone</span>
+          <span class="confirm">
+            <button class="yes" disabled={emptying} onclick={emptyTrash}>{emptying ? "Emptying…" : "Delete"}</button>
+            <button class="no" disabled={emptying} onclick={() => (confirmTrash = false)}>Cancel</button>
+          </span>
+        {:else}
+          <span class="big">{v.trash ? bytes(v.trash) : "Empty"}</span>
+          {#if v.trash}<button class="link" onclick={emptyTrash}>Empty</button>{/if}
         {/if}
       </div>
     </div>
@@ -451,8 +458,27 @@
   .link:hover {
     color: #fff;
   }
-  .link.danger {
-    color: #ff9c9c;
+  .confirm {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .confirm button {
+    white-space: nowrap;
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+  .confirm .yes {
+    background: #d9415e;
+    color: #fff;
+  }
+  .confirm .no {
+    color: var(--text-2);
+  }
+  .confirm .no:hover {
+    color: #fff;
   }
   h2 {
     margin: 4px 4px 0;
