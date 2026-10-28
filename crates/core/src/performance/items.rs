@@ -204,9 +204,6 @@ fn merge(mut items: Vec<LaunchItem>, btm: Vec<LaunchItem>) -> Vec<LaunchItem> {
             None => items.push(b),
         }
     }
-    for i in &mut items {
-        i.is_self = crate::protection::persistence::is_our_watcher(i);
-    }
     items.sort_by_key(|i| (i.kind as u8, !i.enabled, i.name.to_lowercase()));
     items
 }
@@ -304,6 +301,10 @@ pub fn list(open_at_login_apps: bool) -> Vec<LaunchItem> {
         });
     }
 
+    // Full List builds on this list, so it inherits the marking too.
+    for i in &mut items {
+        i.is_self = crate::protection::persistence::is_our_watcher(i);
+    }
     items.sort_by_key(|i| (i.kind as u8, !i.enabled, i.name.to_lowercase()));
     items
 }
