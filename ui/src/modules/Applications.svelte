@@ -22,6 +22,11 @@
       await apps.scan();
       if (q.has("review")) apps.review((q.get("review") || "apps") as Section);
       if (q.has("expand")) apps.expanded.add("/Applications/zoom.us.app");
+      if (q.get("review") === "updates") {
+        while (!apps.updates) await new Promise((r) => setTimeout(r, 100));
+        apps.expanded.add("/Applications/Maccy.app");
+        if (q.has("install")) apps.installUpdates([...apps.updatePicked, "/Applications/iTerm.app", "/Applications/WhatsApp.app"]);
+      }
       if (q.has("confirm")) {
         apps.select([{ kind: "app", id: "/Applications/zoom.us.app" }, { kind: "app", id: "/Applications/Claude.app" }, { kind: "leftover", id: "net.metaquotes.wine" }], true);
         apps.sheet = "confirm";

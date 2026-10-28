@@ -2,6 +2,9 @@
 // http://localhost:1420). Lets the UI be designed and screenshotted without Tauri.
 import type {
   ActivityEvent,
+  AppUpdate,
+  UpdateEvent,
+  UpdatesReport,
   LaunchItem,
   PerfReport,
   TaskResult,
@@ -247,6 +250,38 @@ let activity: ActivityEvent[] = location.hash.includes("noactivity")
       { at: days(0), module: "cleanup", action: "Cleaned junk", bytes: 2.2 * GB, items: 6, detail: "system" },
     ];
 
+const upd = (name: string, source: AppUpdate["source"], installed: string, latest: string, extra: Partial<AppUpdate> = {}): AppUpdate => ({
+  id: `/Applications/${name}.app`,
+  name,
+  appPath: `/Applications/${name}.app`,
+  source,
+  installed,
+  latest,
+  size: null,
+  notes: null,
+  notesUrl: null,
+  oneClick: source === "sparkle" || source === "homebrew",
+  actionNote: source === "appStore" ? "Opens in the App Store, which installs it" : source === "catalog" ? "Updates itself: opens the app so it can install the update" : null,
+  signed: source === "appStore",
+  requires: null,
+  running: false,
+  ...extra,
+});
+
+let updates: AppUpdate[] = [
+  upd("Maccy", "sparkle", "2.7.1", "2.8.0", { notes: "• Pin items with ⌥P\n• Faster search in long histories\n• Fixes a crash when pasting images" }),
+  upd("Transmission", "sparkle", "4.0.6", "4.1.4", { size: 11.5 * MB, signed: false, notes: "Fixes and performance improvements." }),
+  upd("iTerm", "sparkle", "3.7.5", "3.7.6", { size: 45 * MB, signed: true, running: true, notes: "Bug fixes." }),
+  upd("Wave", "homebrew", "0.10.4", "0.14.5", { notes: "Open-source AI-native terminal" }),
+  upd("RAR Archiver", "homebrew", "6.23", "7.23", { id: "brew:rar", appPath: null }),
+  upd("WhatsApp", "appStore", "26.38.74", "26.42.74", { size: 418 * MB, notes: "We update the app regularly to fix bugs, optimize performance and improve the experience." }),
+  upd("Xcode", "appStore", "26.5", "27.1", { size: 3.1 * GB, notes: "Xcode 27.1 includes Swift 6.4 and SDKs for iOS 27.1." }),
+  upd("Developer", "appStore", "10.8.3", "11.1.1", { size: 27.6 * MB, requires: "Needs macOS 27.0" }),
+  upd("Google Chrome", "catalog", "156.0.8078.49", "156.0.8078.74"),
+  upd("Obsidian", "catalog", "1.14.4", "1.14.5"),
+  upd("pgAdmin 4", "catalog", "9.2", "9.18", { actionNote: "Opens the developer's website to download it" }),
+];
+
 const perf = {
   scan: async () => {
     await wait(900);
@@ -460,6 +495,34 @@ export const mock = {
       .sort((a, b) => b.size - a.size);
     const name = path === "/" ? "WANPEN" : path.split("/").pop()!;
     return { path, name, size: node.size, items: node.items ?? 0, denied: path === "/private", entries, restCount: 0, restSize: 0 };
+  },
+  async checkUpdates(onStep: (s: string) => void): Promise<UpdatesReport> {
+    for (const s of ["Asking the App Store…", "Checking Maccy…", "Asking Homebrew…", "Checking Homebrew's catalog…"]) {
+      onStep(s);
+      await wait(location.hash.includes("slowupdates") ? 4000 : 250);
+    }
+    return { updates, checked: 49, unchecked: ["Adobe Photoshop 2026", "Microsoft Word", "zoom.us"], errors: [["Twingate", "curl: (56) 400"]], elapsedMs: 2900 };
+  },
+  async installUpdates(ids: string[], onEvent: (e: UpdateEvent) => void): Promise<string[]> {
+    const done: string[] = [];
+    for (const id of ids) {
+      const u = updates.find((x) => x.id === id);
+      if (!u) continue;
+      for (const step of u.oneClick ? ["Downloading…", "Checking the developer's signature…", "Verifying…", "Installing…"] : ["Opening…"]) {
+        onEvent({ status: "started", id, step });
+        await wait(location.hash.includes("slowinstall") ? 1500 : 200);
+      }
+      if (u.running) {
+        onEvent({ status: "failed", id, error: `${u.name} is running. Quit it, then update.` });
+      } else if (u.source === "appStore" || u.source === "catalog") {
+        onEvent({ status: "done", id, message: u.source === "appStore" ? "Opened in the App Store. Click Update there." : `Opened ${u.name}. Use its Check for Updates.` });
+      } else {
+        done.push(id);
+        onEvent({ status: "done", id, message: `Updated to ${u.latest}. The old version is in the Trash.` });
+      }
+    }
+    updates = updates.filter((u) => !done.includes(u.id));
+    return done;
   },
   async appsScan(onProgress: (p: Progress) => void): Promise<AppsReport> {
     for (let i = 1; i <= 10; i++) {

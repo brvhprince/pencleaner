@@ -1,15 +1,16 @@
 // Applications state, at module scope so results survive switching modules.
 import type { Component } from "svelte";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import { AppWindow, Download, PackageX } from "@lucide/svelte";
-import { api, type AppEntry, type AppTarget, type AppsReport, type CleanSummary, type Progress } from "../../lib/api";
+import { AppWindow, Download, PackageX, RefreshCw } from "@lucide/svelte";
+import { api, type AppEntry, type AppTarget, type AppUpdate, type AppsReport, type CleanSummary, type Progress, type UpdatesReport } from "../../lib/api";
 import { bytes, plural } from "../../lib/format";
 import { app } from "../../lib/state.svelte";
 
-export type Section = "apps" | "leftovers" | "installers";
+export type Section = "apps" | "updates" | "leftovers" | "installers";
 
 export const SECTIONS: { id: Section; title: string; blurb: string; icon: Component }[] = [
   { id: "apps", title: "Uninstaller", blurb: "Remove apps together with the support files, caches and helpers they scattered around.", icon: AppWindow },
+  { id: "updates", title: "Updater", blurb: "Newer versions from the App Store, the apps' own update feeds and Homebrew.", icon: RefreshCw },
   { id: "leftovers", title: "Leftovers", blurb: "Files left behind by apps that are already gone.", icon: PackageX },
   { id: "installers", title: "Installation Files", blurb: "Disk images and installer packages that have done their job.", icon: Download },
 ];
@@ -31,6 +32,12 @@ function parse(k: string): AppTarget {
 
 export type RemoveStatus = "pending" | "working" | "done" | "failed";
 
+export interface UpdateState {
+  status: "working" | "done" | "failed";
+  /** Current step while working, the outcome after. */
+  message: string;
+}
+
 class Apps {
   phase = $state<"home" | "scanning" | "results">("home");
   view = $state<"summary" | "review">("summary");
@@ -47,6 +54,16 @@ class Apps {
   result = $state<CleanSummary | null>(null);
 
   unused = $derived(this.report?.apps.filter(isUnused) ?? []);
+
+  // Updater: checked in the background so a slow network never delays the scan.
+  updates = $state<UpdatesReport | null>(null);
+  checkingUpdates = $state(false);
+  updateStep = $state("");
+  updatePicked = new SvelteSet<string>();
+  updateState = new SvelteMap<string, UpdateState>();
+  installing = $state(false);
+
+  installable = $derived(this.updates?.updates.filter((u) => u.oneClick && !u.requires) ?? []);
 
   sizeOf(k: string): number {
     const { kind, id } = parse(k);
@@ -78,9 +95,49 @@ class Apps {
     app.phases.applications = p;
   }
 
+  async checkUpdates() {
+    if (this.checkingUpdates) return;
+    this.checkingUpdates = true;
+    this.updateStep = "";
+    try {
+      this.updates = await api.apps.checkUpdates((s) => (this.updateStep = s));
+      this.updatePicked.clear();
+      this.updateState.clear();
+      for (const u of this.installable) if (!u.running) this.updatePicked.add(u.id);
+    } catch (e) {
+      app.toast(`Couldn't check for updates: ${e}`, "error");
+    } finally {
+      this.checkingUpdates = false;
+    }
+  }
+
+  /** One-click updates install in place; the rest open the App Store, app or website. */
+  async installUpdates(ids: string[]) {
+    if (!ids.length || this.installing) return;
+    this.installing = true;
+    for (const id of ids) this.updateState.set(id, { status: "working", message: "Waiting…" });
+    try {
+      const done = await api.apps.installUpdates(ids, (ev) => {
+        if (ev.status === "started") this.updateState.set(ev.id, { status: "working", message: ev.step });
+        else if (ev.status === "done") this.updateState.set(ev.id, { status: "done", message: ev.message });
+        else this.updateState.set(ev.id, { status: "failed", message: ev.error });
+      });
+      for (const id of done) this.updatePicked.delete(id);
+      const n = done.length;
+      if (n) app.toast(`${plural(n, "app")} updated.`, "success");
+      const failed = ids.filter((id) => this.updateState.get(id)?.status === "failed").length;
+      if (failed) app.toast(`${plural(failed, "update")} didn't install. See the list for why.`, "error");
+    } catch (e) {
+      app.toast(`Updating stopped: ${e}`, "error");
+    } finally {
+      this.installing = false;
+    }
+  }
+
   async scan() {
     this.progress = null;
     this.setPhase("scanning");
+    void this.checkUpdates();
     try {
       this.report = await api.apps.scan((p) => (this.progress = p));
       this.selected.clear();

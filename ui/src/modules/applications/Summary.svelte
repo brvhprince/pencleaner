@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { RotateCcw } from "@lucide/svelte";
+  import { RefreshCw, RotateCcw } from "@lucide/svelte";
   import AppIcon from "../../lib/components/AppIcon.svelte";
   import FileIcon from "../../lib/components/FileIcon.svelte";
   import { bytes, plural } from "../../lib/format";
@@ -11,6 +11,21 @@
   const installerSize = $derived(r.installers.reduce((s, i) => s + i.size, 0));
   const heaviest = $derived([...r.apps].sort((a, b) => b.relatedSize - a.relatedSize)[0]);
   const showcase = $derived((apps.unused.length ? apps.unused : r.apps).slice(0, 3));
+
+  const updatesTitle = $derived(
+    apps.checkingUpdates && !apps.updates
+      ? "Checking for updates…"
+      : apps.updates?.updates.length
+        ? `${plural(apps.updates.updates.length, "Update")} Available`
+        : "Apps Are Up to Date",
+  );
+  const updatesText = $derived(
+    apps.checkingUpdates && !apps.updates
+      ? apps.updateStep || "Asking the App Store, developer feeds and Homebrew."
+      : apps.updates?.updates.length
+        ? `${apps.installable.length} install in one click; the rest open the App Store or the app.`
+        : `Checked ${apps.updates?.checked ?? 0} apps.`,
+  );
 
   function quickLeftovers() {
     apps.select(apps.recommendedLeftovers(), true);
@@ -43,15 +58,29 @@
       <span class="btn">Review</span>
     </button>
 
-    <div class="card glass">
-      <h3>{r.leftovers.length ? `${bytes(leftoverSize)} of App Leftovers` : "No App Leftovers"}</h3>
-      <p>{r.leftovers.length ? `Support files from ${plural(r.leftovers.length, "app")} that ${r.leftovers.length === 1 ? "is" : "are"} no longer installed.` : "Removed apps left nothing behind."}</p>
-      {#if r.leftovers.length}
-        <div class="actions">
-          <button class="btn" onclick={() => apps.review("leftovers")}>Review</button>
-          <button class="btn primary" onclick={quickLeftovers}>Select Safe Ones</button>
-        </div>
-      {/if}
+    <div class="card glass split">
+      <div>
+        <div class="head"><span class="badge"><RefreshCw size={15} /></span><h3>{updatesTitle}</h3></div>
+        <p>{updatesText}</p>
+        {#if apps.updates?.updates.length}
+          <div class="actions">
+            <button class="btn" onclick={() => apps.review("updates")}>Review</button>
+            {#if apps.installable.length}
+              <button class="btn primary" onclick={() => { apps.review("updates"); apps.installUpdates([...apps.updatePicked]); }} disabled={apps.installing || !apps.updatePicked.size}>Update {apps.updatePicked.size}</button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+      <div>
+        <h3>{r.leftovers.length ? `${bytes(leftoverSize)} of App Leftovers` : "No App Leftovers"}</h3>
+        <p>{r.leftovers.length ? `Support files from ${plural(r.leftovers.length, "app")} that ${r.leftovers.length === 1 ? "is" : "are"} no longer installed.` : "Removed apps left nothing behind."}</p>
+        {#if r.leftovers.length}
+          <div class="actions">
+            <button class="btn" onclick={() => apps.review("leftovers")}>Review</button>
+            <button class="btn primary" onclick={quickLeftovers}>Select Safe</button>
+          </div>
+        {/if}
+      </div>
     </div>
 
     <div class="card glass split">
@@ -181,6 +210,15 @@
   }
   .split > div + div {
     border-left: 1px solid var(--glass-border);
+  }
+  .badge {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    flex: none;
+    background: linear-gradient(160deg, var(--accent-strong), var(--accent));
   }
   .head {
     display: flex;

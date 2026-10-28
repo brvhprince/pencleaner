@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { ChevronDown, ChevronLeft, ChevronRight, Lock, PackageX, ScanSearch, Search } from "@lucide/svelte";
-  import { api, type AppEntry, type AppTarget, type RelatedFile } from "../../lib/api";
+  import { ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Lock, PackageX, RefreshCw, ScanSearch, Search, ShieldCheck } from "@lucide/svelte";
+  import { api, type AppEntry, type AppTarget, type AppUpdate, type RelatedFile } from "../../lib/api";
   import AppIcon from "../../lib/components/AppIcon.svelte";
   import Checkbox from "../../lib/components/Checkbox.svelte";
   import FileIcon from "../../lib/components/FileIcon.svelte";
@@ -34,7 +34,26 @@
   const installerRows = $derived(r.installers.filter((i) => !q || i.name.toLowerCase().includes(q)));
 
   const count = (s: (typeof SECTIONS)[number]["id"]) =>
-    s === "apps" ? r.apps.length : s === "leftovers" ? r.leftovers.length : r.installers.length;
+    s === "apps"
+      ? r.apps.length
+      : s === "updates"
+        ? (apps.updates?.updates.length ?? (apps.checkingUpdates ? "…" : 0))
+        : s === "leftovers"
+          ? r.leftovers.length
+          : r.installers.length;
+
+  const SOURCE: Record<AppUpdate["source"], string> = { appStore: "App Store", sparkle: "Developer feed", homebrew: "Homebrew", catalog: "Homebrew catalog" };
+  const updateRows = $derived(
+    (apps.updates?.updates ?? []).filter((u) => !q || u.name.toLowerCase().includes(q)),
+  );
+  const storeCount = $derived(updateRows.filter((u) => u.source === "appStore" && !u.requires).length);
+
+  function actionLabel(u: AppUpdate) {
+    if (u.oneClick) return "Update";
+    if (u.source === "appStore") return "App Store";
+    if (u.source === "homebrew") return "How to";
+    return u.actionNote?.startsWith("Opens the developer") ? "Website" : "Open App";
+  }
 
   const visible = $derived<AppTarget[]>(
     apps.section === "apps"
@@ -107,7 +126,13 @@
         <h3>{meta.title}</h3>
         <p>{meta.blurb}</p>
         <div class="controls">
-          {#if apps.section === "apps"}
+          {#if apps.section === "updates"}
+            <span>Select:</span>
+            <button onclick={() => { for (const u of apps.installable) if (!u.running) apps.updatePicked.add(u.id); }}>All one-click</button>
+            <button onclick={() => apps.updatePicked.clear()}>None</button>
+            {#if storeCount}<button class="push" onclick={() => api.apps.openAppStoreUpdates()}>Open App Store Updates ({storeCount})</button>{/if}
+            <button class:push={!storeCount} onclick={() => apps.checkUpdates()} disabled={apps.checkingUpdates}><RefreshCw size={11} /> Check Again</button>
+          {:else if apps.section === "apps"}
             <div class="chips">
               {#each [["all", "All"], ["unused", "Unused 6+ months"], ["large", "Over 1 GB"], ["store", "App Store"]] as [id, label] (id)}
                 <button class:on={filter === id} onclick={() => (filter = id as typeof filter)}>{label}</button>
@@ -129,7 +154,61 @@
       </div>
 
       <ul>
-        {#if apps.section === "apps"}
+        {#if apps.section === "updates"}
+          {#if apps.checkingUpdates && !apps.updates}
+            <li class="empty"><span class="spin"></span> {apps.updateStep || "Checking for updates…"}</li>
+          {:else}
+            {#each updateRows as u (u.id)}
+              {@const st = apps.updateState.get(u.id)}
+              <li class="block">
+                <div class="line">
+                  {#if u.oneClick && !u.requires}
+                    <Checkbox state={apps.updatePicked.has(u.id)} onchange={() => (apps.updatePicked.has(u.id) ? apps.updatePicked.delete(u.id) : apps.updatePicked.add(u.id))} label="Select {u.name}" disabled={apps.installing} />
+                  {:else}
+                    <span class="nobox"></span>
+                  {/if}
+                  <div class="row" role="button" tabindex="0" onclick={() => toggleOpen(u.id)} onkeydown={(e) => e.key === "Enter" && toggleOpen(u.id)}>
+                    {#if u.appPath}<AppIcon path={u.appPath} size={32} />{:else}<FileIcon kind="installer" size={32} />{/if}
+                    <span class="text">
+                      <span class="name">
+                        {u.name}
+                        <em class="tag">{SOURCE[u.source]}</em>
+                        {#if u.signed}<span class="shield" title={u.source === "appStore" ? "Delivered by Apple" : "Signed by the developer; verified before installing"}><ShieldCheck size={12} /></span>{/if}
+                        {#if u.running}<em class="tag live">Running</em>{/if}
+                      </span>
+                      <span class="detail">
+                        {#if st}
+                          <span class="st {st.status}">{#if st.status === "working"}<span class="spin"></span>{:else if st.status === "done"}<CircleCheck size={11} />{:else}<CircleAlert size={11} />{/if} {st.message}</span>
+                        {:else if u.requires}
+                          <span class="st failed">{u.requires}</span>
+                        {:else}
+                          <span class="ver tabular">{u.installed} → <strong>{u.latest}</strong></span>{#if u.actionNote} · {u.actionNote}{/if}
+                        {/if}
+                      </span>
+                    </span>
+                    {#if u.size}<span class="size tabular">{bytes(u.size)}</span>{/if}
+                  </div>
+                  <button class="act" disabled={apps.installing || !!u.requires || st?.status === "done"} onclick={() => apps.installUpdates([u.id])}>{actionLabel(u)}</button>
+                </div>
+                {#if apps.expanded.has(u.id)}
+                  <div class="notes">
+                    {#if u.notes}<p>{u.notes}</p>{:else}<p class="muted">No release notes provided.</p>{/if}
+                    {#if u.notesUrl}<button class="link" onclick={() => api.openUrl(u.notesUrl!)}>More details</button>{/if}
+                  </div>
+                {/if}
+              </li>
+            {:else}
+              <li class="empty">Everything is up to date.</li>
+            {/each}
+            {#if apps.updates}
+              <li class="footnote">
+                Checked {apps.updates.checked} apps.
+                {#if apps.updates.unchecked.length}<span title={apps.updates.unchecked.join(", ")}>{apps.updates.unchecked.length} have no source PenCleaner can check; most update themselves.</span>{/if}
+                {#if apps.updates.errors.length}<span title={apps.updates.errors.map(([a, b]) => `${a}: ${b}`).join("\n")}>{plural(apps.updates.errors.length, "source")} didn't answer.</span>{/if}
+              </li>
+            {/if}
+          {/if}
+        {:else if apps.section === "apps"}
           {#each appRows as a (a.id)}
             {@const t = { kind: "app", id: a.id } as const}
             <li class="block">
@@ -213,16 +292,119 @@
   </div>
 
   <footer>
-    <span class="count tabular">
-      {apps.selected.size ? plural(apps.selected.size, "item") + " selected" : "No items selected"} <i>|</i> {bytes(apps.selectedSize)}
-    </span>
-    <button class="action" disabled={!apps.selected.size} onclick={() => (apps.sheet = "confirm")}>
-      {apps.selectedApps.length ? "Uninstall" : "Remove"}
-    </button>
+    {#if apps.section === "updates"}
+      <span class="count tabular">
+        {apps.updatePicked.size ? plural(apps.updatePicked.size, "update") + " selected" : "No one-click updates selected"}
+        {#if apps.updatePicked.size}<i>|</i> old versions go to the Trash{/if}
+      </span>
+      <button class="action" disabled={!apps.updatePicked.size || apps.installing} onclick={() => apps.installUpdates([...apps.updatePicked])}>
+        {apps.installing ? "Updating…" : "Update"}
+      </button>
+    {:else}
+      <span class="count tabular">
+        {apps.selected.size ? plural(apps.selected.size, "item") + " selected" : "No items selected"} <i>|</i> {bytes(apps.selectedSize)}
+      </span>
+      <button class="action" disabled={!apps.selected.size} onclick={() => (apps.sheet = "confirm")}>
+        {apps.selectedApps.length ? "Uninstall" : "Remove"}
+      </button>
+    {/if}
   </footer>
 </div>
 
 <style>
+  .nobox {
+    width: 16px;
+    flex: none;
+  }
+  .shield {
+    display: inline-grid;
+    margin-left: 5px;
+    color: #2f7d4a;
+    vertical-align: -1px;
+  }
+  .ver strong {
+    color: var(--m-text);
+  }
+  .st {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 600;
+  }
+  .st.done {
+    color: #2f7d4a;
+  }
+  .st.failed {
+    color: #c0392b;
+  }
+  .st.working {
+    color: var(--m-accent);
+  }
+  .spin {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid #d4d0de;
+    border-top-color: var(--m-accent);
+    animation: spin 0.8s linear infinite;
+    vertical-align: -1px;
+  }
+  .act {
+    flex: none;
+    min-width: 82px;
+    height: 26px;
+    padding: 0 12px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--m-accent);
+    background: color-mix(in srgb, var(--m-accent) 12%, white);
+  }
+  .act:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--m-accent) 20%, white);
+  }
+  .act:disabled {
+    opacity: 0.45;
+  }
+  .notes {
+    margin: 0 8px 10px 72px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #f6f5f9;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .notes p {
+    white-space: pre-line;
+    color: var(--m-text);
+  }
+  .notes .muted {
+    color: var(--m-muted);
+  }
+  .notes .link {
+    margin-top: 6px;
+    font-weight: 600;
+    color: var(--m-accent);
+  }
+  .footnote {
+    min-height: 0 !important;
+    padding: 14px 10px !important;
+    font-size: 11.5px;
+    color: var(--m-muted);
+    gap: 6px;
+  }
+  .footnote:hover {
+    background: none !important;
+  }
+  .empty .spin {
+    margin-right: 6px;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
   .block {
     display: block;
     padding: 0;

@@ -23,6 +23,9 @@ cargo run --release -p pencleaner-core --example cleanup [developer] # Cleanup d
 cargo run --release -p pencleaner-core --example clutter [folder]    # My Clutter dry run (never deletes)
 cargo run --release -p pencleaner-core --example apps                # Applications dry run (never deletes)
 cargo run --release -p pencleaner-core --example perf                # Performance readout (runs no tasks)
+cargo run --release -p pencleaner-core --example updates             # App Updater check (installs nothing)
+cargo run --release -p pencleaner-core --example verify_update -- /Applications/Maccy.app
+                                                                     # full download + verification, no install
 ```
 
 In a browser, `http://localhost:1420/#module=spacelens&autoscan&open=/Users/wanpeninsula&select&review`
@@ -40,7 +43,7 @@ drives Space Lens through every state against the mock backend, and
 | Smart Care | One scan across Cleanup, Performance and app leftovers; runs only safe, recommended items |
 | Cleanup | System, developer, AI, Mail and Trash junk |
 | Performance | Maintenance tasks, memory, login and background items, Time Machine snapshots |
-| Applications | Uninstaller with support files, leftovers of removed apps, installer files |
+| Applications | Uninstaller with support files, App Updater, leftovers of removed apps, installer files |
 | My Clutter | Duplicates, similar images, large and old files, Downloads |
 | Space Lens | Bubble map of what's using the disk |
 | My Activity | History of everything freed, removed or run (`~/Library/Application Support/com.pen.cleaner/activity.jsonl`) |

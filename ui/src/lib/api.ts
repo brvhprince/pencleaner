@@ -1,5 +1,6 @@
 // Typed wrappers over the Tauri commands in src-tauri/src/commands.rs.
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { mock } from "./mock";
 
 /** False when the UI is opened in a plain browser; `mock` then stands in for Rust. */
@@ -277,6 +278,38 @@ export interface ActivityEvent {
   detail: string | null;
 }
 
+export type UpdateSource = "appStore" | "sparkle" | "homebrew" | "catalog";
+
+export interface AppUpdate {
+  id: string;
+  name: string;
+  appPath: string | null;
+  source: UpdateSource;
+  installed: string;
+  latest: string;
+  size: number | null;
+  notes: string | null;
+  notesUrl: string | null;
+  oneClick: boolean;
+  actionNote: string | null;
+  signed: boolean;
+  requires: string | null;
+  running: boolean;
+}
+
+export interface UpdatesReport {
+  updates: AppUpdate[];
+  checked: number;
+  unchecked: string[];
+  errors: [string, string][];
+  elapsedMs: number;
+}
+
+export type UpdateEvent =
+  | { status: "started"; id: string; step: string }
+  | { status: "done"; id: string; message: string }
+  | { status: "failed"; id: string; error: string };
+
 /** URL for showing a local image in the webview. */
 export function fileSrc(path: string) {
   return inTauri ? convertFileSrc(path) : mock.thumb(path);
@@ -287,6 +320,8 @@ const tauriApi = {
   volumes: () => invoke<Volume[]>("volumes_list"),
   openFullDiskAccessSettings: () => invoke<void>("open_full_disk_access_settings"),
   revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),
+  /** http(s) links only, in the default browser. */
+  openUrl: (url: string) => (/^https?:\/\//.test(url) ? openUrl(url) : Promise.resolve()),
 
   spaceLens: {
     scan(root: string, onProgress: (p: Progress) => void) {
@@ -339,6 +374,17 @@ const tauriApi = {
       return invoke<CleanSummary>("apps_remove", { targets, onEvent: ch });
     },
     icon: (path: string) => invoke<string | null>("app_icon", { path }),
+    checkUpdates(onStep: (step: string) => void) {
+      const ch = new Channel<string>();
+      ch.onmessage = onStep;
+      return invoke<UpdatesReport>("updates_scan", { onStep: ch });
+    },
+    installUpdates(ids: string[], onEvent: (e: UpdateEvent) => void) {
+      const ch = new Channel<UpdateEvent>();
+      ch.onmessage = onEvent;
+      return invoke<string[]>("updates_install", { ids, onEvent: ch });
+    },
+    openAppStoreUpdates: () => invoke<void>("open_app_store_updates"),
   },
 
   perf: {
@@ -372,6 +418,9 @@ const mockApi: typeof tauriApi = {
   volumes: mock.volumes,
   openFullDiskAccessSettings: async () => {},
   revealInFinder: async () => {},
+  openUrl: async (url: string) => {
+    window.open(url, "_blank");
+  },
   spaceLens: {
     scan: mock.scan,
     cancel: async () => {},
@@ -392,6 +441,9 @@ const mockApi: typeof tauriApi = {
     scan: mock.appsScan,
     remove: mock.appsRemove,
     icon: async () => null,
+    checkUpdates: mock.checkUpdates,
+    installUpdates: mock.installUpdates,
+    openAppStoreUpdates: async () => {},
   },
   perf: mock.perf,
   activity: mock.activity,

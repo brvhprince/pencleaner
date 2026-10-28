@@ -17,6 +17,7 @@ pub mod remove;
 pub mod safety;
 pub mod space_lens;
 pub mod spotlight;
+pub mod updater;
 pub mod volumes;
 
 pub use error::{Error, Result};

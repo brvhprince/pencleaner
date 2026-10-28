@@ -6,6 +6,7 @@ use pencleaner_core::cleanup::{self, Category, CleanEvent, CleanSummary, Report}
 use pencleaner_core::activity::{self, Event};
 use pencleaner_core::applications::{self, AppsReport, Target};
 use pencleaner_core::clutter::{self, ClutterReport};
+use pencleaner_core::updater::{self, UpdateEvent, UpdatesReport};
 use pencleaner_core::performance::{self, items::LaunchItem, memory, PerfReport, TaskResult};
 use pencleaner_core::progress::{Progress, ScanControl};
 use pencleaner_core::remove::{self, RemoveEvent, RemoveItem, RemoveMode, RemoveSummary};
@@ -49,6 +50,7 @@ pub struct AppState {
     apps: RwLock<Option<AppsReport>>,
     icons: Mutex<HashMap<String, Option<String>>>,
     perf: RwLock<Option<PerfReport>>,
+    updates: RwLock<Option<UpdatesReport>>,
 }
 
 #[derive(Serialize)]
@@ -452,4 +454,43 @@ pub fn activity_list(app: AppHandle) -> Vec<Event> {
 #[tauri::command]
 pub fn activity_clear(app: AppHandle) -> CmdResult<()> {
     activity_log(&app).map_or(Ok(()), |l| l.clear().map_err(|e| e.to_string()))
+}
+
+/// Checks App Store, Sparkle feeds and Homebrew for newer versions. Network-bound.
+#[tauri::command]
+pub async fn updates_scan(app: AppHandle, on_step: Channel<String>) -> CmdResult<UpdatesReport> {
+    let cache = app.path().app_cache_dir().ok();
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        updater::scan(cache.as_deref(), |step| {
+            let _ = on_step.send(step.to_owned());
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    *app.state::<AppState>().updates.write() = Some(report.clone());
+    Ok(report)
+}
+
+/// Installs updates from the last check, by id, one at a time.
+#[tauri::command]
+pub async fn updates_install(app: AppHandle, ids: Vec<String>, on_event: Channel<UpdateEvent>) -> CmdResult<Vec<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut guard = state.updates.write();
+        let report = guard.as_mut().ok_or("Check for updates first")?;
+        let names: HashMap<String, String> = report.updates.iter().map(|u| (u.id.clone(), u.name.clone())).collect();
+        let done = report.install(&ids, |ev| {
+            let _ = on_event.send(ev);
+        });
+        let list: Vec<&str> = done.iter().filter_map(|id| names.get(id).map(String::as_str)).collect();
+        record(&app, "applications", "Updated apps", 0, done.len(), Some(list.join(", ")));
+        Ok(done)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn open_app_store_updates() -> CmdResult<()> {
+    open(&["macappstore://showUpdatesPage"])
 }

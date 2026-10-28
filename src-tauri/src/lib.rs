@@ -37,6 +37,9 @@ pub fn run() {
             commands::open_login_items_settings,
             commands::activity_list,
             commands::activity_clear,
+            commands::updates_scan,
+            commands::updates_install,
+            commands::open_app_store_updates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PenCleaner");
