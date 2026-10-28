@@ -431,6 +431,7 @@ export interface Vitals {
   netDown: number;
   trash: number;
   uptimeSecs: number;
+  sensors: { cpuCelsius: number | null; fanRpm: number | null; fanMaxRpm: number | null } | null;
   health: "good" | "fair" | "attention";
 }
 

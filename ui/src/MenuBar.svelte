@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowDown, ArrowUp, BatteryCharging, BatteryFull, BatteryLow, Cpu, HardDrive, Laptop, MemoryStick, Settings, ShieldCheck, ShieldOff, Sparkles, Trash, Wifi } from "@lucide/svelte";
+  import { ArrowDown, ArrowUp, BatteryCharging, BatteryFull, BatteryLow, Cpu, HardDrive, Laptop, MemoryStick, Settings, ShieldCheck, ShieldOff, Sparkles, Thermometer, Trash, Wifi } from "@lucide/svelte";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
   import { api, inTauri, type ActivityEvent, type CareStatus, type TrashedApp, type Vitals } from "./lib/api";
@@ -119,6 +119,10 @@
     if (v && v.trash > 1e9) {
       return { icon: Trash, title: `The Trash holds ${bytes(v.trash)}`, text: "Emptying it gives that space back.", action: confirmTrash ? `Empty ${bytes(v.trash)} for good?` : "Empty Trash", run: emptyTrash };
     }
+    const temp = v?.sensors?.cpuCelsius;
+    if (temp != null && temp >= 90) {
+      return { icon: Thermometer, title: "Your Mac is running hot", text: `The CPU is at ${Math.round(temp)} °C. See what's keeping it busy.`, action: "Open Performance", run: () => api.showMain("performance") };
+    }
     if (care?.due) {
       const since = care.lastRun ? `Last run ${ago(care.lastRun)}.` : `You asked for one every ${care.everyDays === 1 ? "day" : `${care.everyDays} days`}.`;
       return { icon: Sparkles, title: "Smart Care is due", text: since, action: "Run Smart Care", run: () => api.showMain("smartcare") };
@@ -230,6 +234,10 @@
       <div class="card tile">
         <span class="t"><Cpu size={15} /> CPU</span>
         <span class="big">{v.cpuLoad}%</span>
+        {#if v.sensors?.cpuCelsius != null}
+          {@const t = Math.round(v.sensors.cpuCelsius)}
+          <span class="sub"><span class:warn={t >= 90}>{t} °C</span>{#if v.sensors.fanRpm != null}{" · "}fan {v.sensors.fanRpm.toLocaleString()} rpm{/if}</span>
+        {/if}
         <span class="sub">load · up {uptime}</span>
         <div class="bar"><div style:width="{v.cpuLoad}%" class:hot={v.cpuLoad > 85}></div></div>
       </div>
@@ -398,6 +406,7 @@
     color: var(--text-2);
   }
   .sub.warn,
+  .sub .warn,
   .big.warn {
     color: #ffd08a;
   }

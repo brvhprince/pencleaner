@@ -17,6 +17,7 @@ pub mod protection;
 pub mod progress;
 pub mod remove;
 pub mod safety;
+pub mod sensors;
 pub mod settings;
 pub mod space_lens;
 pub mod spotlight;

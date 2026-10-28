@@ -39,6 +39,8 @@ pub struct Vitals {
     pub net_down: u64,
     pub trash: u64,
     pub uptime_secs: u64,
+    /// CPU temperature and fans, where the Mac exposes them (Intel; see `sensors`).
+    pub sensors: Option<crate::sensors::Sensors>,
     /// "good", "fair" or "attention".
     pub health: String,
 }
@@ -194,11 +196,14 @@ impl Sampler {
         let disk = volumes::list().into_iter().find(|v| v.is_root);
         let (disk_name, disk_free, disk_total) = disk.map_or(("Mac".into(), 0, 0), |d| (d.name, d.free, d.total));
 
+        let sensors = crate::sensors::read();
+        let hot = sensors.as_ref().and_then(|s| s.cpu_celsius).unwrap_or(0.0);
+
         let free_share = if disk_total > 0 { disk_free as f64 / disk_total as f64 } else { 1.0 };
-        let health = if free_share < 0.1 || mem.pressure == "critical" {
+        let health = if free_share < 0.1 || mem.pressure == "critical" || hot >= 100.0 {
             "attention"
         // Swap alone isn't trouble: macOS swaps idle memory even when pressure is normal.
-        } else if free_share < 0.2 || mem.pressure == "warning" {
+        } else if free_share < 0.2 || mem.pressure == "warning" || hot >= 90.0 {
             "fair"
         } else {
             "good"
@@ -218,6 +223,7 @@ impl Sampler {
             net_down,
             trash,
             uptime_secs: uptime(),
+            sensors,
             health: health.into(),
         }
     }

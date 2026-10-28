@@ -653,6 +653,7 @@ export const mock = {
       netDown: Math.round(j() * 2_000_000),
       trash: location.hash.includes("fulltrash") ? 2.4 * GB : 0,
       uptimeSecs: 589300,
+      sensors: { cpuCelsius: location.hash.includes("hot") ? 94 + j() : 62 + j() * 6, fanRpm: Math.round(1800 + j() * 100), fanMaxRpm: 5616 },
       health: "good" as const,
     };
   },
