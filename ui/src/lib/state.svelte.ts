@@ -22,6 +22,7 @@ class AppState {
     unusedAppDays: 180,
     checkUpdatesOnScan: true,
     onlineNotarization: true,
+    offerTrashedAppCleanup: true,
     ignore: [],
   });
 

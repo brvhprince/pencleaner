@@ -286,6 +286,59 @@ pub fn scan(ctl: &ScanControl) -> AppsReport {
     }
 }
 
+/// An app just moved to the Trash, and what it left behind in Library folders.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashedApp {
+    pub name: String,
+    pub bundle_id: String,
+    /// Where it sits in the Trash (for its icon).
+    pub path: String,
+    pub files: Vec<RelatedFile>,
+    pub size: u64,
+}
+
+/// The leftovers of an app in the Trash, or None when there are none, when another copy
+/// is still installed (its files are in use), or when it's PenCleaner itself.
+pub fn leftovers_of_trashed(app: &Path) -> Option<TrashedApp> {
+    let info = apps::read_bundle(app)?;
+    if info.bundle_id.eq_ignore_ascii_case("com.pen.cleaner") {
+        return None;
+    }
+    if apps::installed().iter().any(|a| a.bundle_id.eq_ignore_ascii_case(&info.bundle_id)) {
+        return None;
+    }
+    let library = matching::index_library(&home_dir());
+    let mine: Vec<&LibEntry> = library.iter().filter(|e| matching::belongs_to(e, &info.bundle_id, &info.name)).collect();
+    let files = related(&mine);
+    if files.is_empty() {
+        return None;
+    }
+    Some(TrashedApp {
+        size: files.iter().map(|f| f.size).sum(),
+        name: info.name,
+        bundle_id: info.bundle_id,
+        path: app.to_string_lossy().into_owned(),
+        files,
+    })
+}
+
+impl TrashedApp {
+    /// Removes the leftovers the same way the Leftovers list does (launch items unloaded
+    /// first, root-owned files behind one password prompt), all to the Trash.
+    pub fn remove(self, on_event: impl FnMut(CleanEvent)) -> CleanSummary {
+        let id = self.bundle_id.clone();
+        let mut report = AppsReport {
+            apps: vec![],
+            leftovers: vec![Leftover { id: id.clone(), vendor_installed: false, files: self.files, size: self.size, last_activity: None }],
+            installers: vec![],
+            elapsed_ms: 0,
+            cancelled: false,
+        };
+        report.remove(&[Target::Leftover(id)], on_event)
+    }
+}
+
 /// Paths root may touch: apps in /Applications and system-wide support folders.
 fn admin_allowed(path: &Path) -> bool {
     const SYSTEM_DIRS: &[&str] = &[
@@ -457,6 +510,17 @@ mod tests {
         assert!(!admin_allowed(Path::new("/System/Library/LaunchDaemons/com.apple.x.plist")));
         assert!(!admin_allowed(Path::new("/Library/Extensions/Foo.kext")));
         assert!(!admin_allowed(Path::new("/usr/local/bin/foo")));
+    }
+
+    #[test]
+    fn trashed_apps_need_a_bundle_and_skip_installed_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(leftovers_of_trashed(dir.path()).is_none(), "not an app");
+        // A copy of an installed app (Calculator) in the Trash: its files are still in use.
+        let copy = dir.path().join("Calculator.app");
+        std::fs::create_dir_all(copy.join("Contents")).unwrap();
+        std::fs::copy("/System/Applications/Calculator.app/Contents/Info.plist", copy.join("Contents/Info.plist")).unwrap();
+        assert!(leftovers_of_trashed(&copy).is_none());
     }
 
     #[test]

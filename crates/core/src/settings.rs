@@ -40,6 +40,8 @@ pub struct Settings {
     pub check_updates_on_scan: bool,
     /// Ask Apple whether background items are notarized during Protection scans (goes online).
     pub online_notarization: bool,
+    /// When an app lands in the Trash, offer to remove what it left behind.
+    pub offer_trashed_app_cleanup: bool,
     pub ignore: Vec<IgnoreRule>,
 }
 
@@ -51,6 +53,7 @@ impl Default for Settings {
             unused_app_days: 180,
             check_updates_on_scan: true,
             online_notarization: true,
+            offer_trashed_app_cleanup: true,
             ignore: Vec::new(),
         }
     }

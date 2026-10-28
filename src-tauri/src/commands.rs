@@ -61,6 +61,7 @@ pub struct AppState {
     protection: RwLock<Option<ProtectionReport>>,
     protection_ctl: Mutex<Option<Arc<ScanControl>>>,
     vitals: pencleaner_core::vitals::Sampler,
+    pub trashed: Mutex<Option<applications::TrashedApp>>,
 }
 
 #[derive(Serialize)]
@@ -777,4 +778,29 @@ pub async fn empty_trash(app: AppHandle) -> CmdResult<u64> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Removes what the just-trashed app left behind (to the Trash).
+#[tauri::command]
+pub async fn trashed_app_remove(app: AppHandle) -> CmdResult<CleanSummary> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let t = app.state::<AppState>().trashed.lock().take().ok_or("Nothing to remove")?;
+        let name = t.name.clone();
+        let summary = t.remove(|_| {});
+        record(&app, "applications", "Removed a trashed app's leftovers", summary.bytes_freed, summary.cleaned.len(), Some(name));
+        match summary.failed.first() {
+            Some((_, e)) => Err(e.clone()),
+            None => Ok(summary),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn trashed_app_dismiss(app: AppHandle) {
+    *app.state::<AppState>().trashed.lock() = None;
+    if let Some(w) = app.get_webview_window(crate::menubar::WINDOW) {
+        let _ = w.hide();
+    }
 }

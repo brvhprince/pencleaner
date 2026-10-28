@@ -9,6 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// PenCleaner's bundle id.
+const SELF_ID: &str = "com.pen.cleaner";
 const SYSTEM_DB: &str = "/Library/Application Support/com.apple.TCC/TCC.db";
 
 /// (TCC service, label, System Settings anchor). Internal iCloud services are left out.
@@ -57,6 +59,8 @@ pub struct Grant {
     /// Bound to the app's code signature, so no other app can inherit it. True for
     /// almost every grant; what makes a removed app's leftover harmless.
     pub locked_to_signer: bool,
+    /// PenCleaner's own grant: revoking it would cripple the app, so it isn't offered.
+    pub is_self: bool,
     /// Lives in the system database: revoking asks for the administrator password.
     pub system: bool,
 }
@@ -137,7 +141,8 @@ pub fn scan() -> Result<Vec<Grant>, String> {
                 app_path: app_path.filter(|p| p.exists()).map(|p| p.to_string_lossy().into_owned()),
                 granted: r.last_modified,
                 orphaned: !installed,
-                revocable: !by_path && installed,
+                revocable: !by_path && installed && !r.client.eq_ignore_ascii_case(SELF_ID),
+                is_self: r.client.eq_ignore_ascii_case(SELF_ID),
                 locked_to_signer: r.has_csreq == 1,
                 system,
                 client: r.client,
@@ -153,6 +158,9 @@ pub fn scan() -> Result<Vec<Grant>, String> {
 /// Revokes with `tccutil reset <Service> <bundle id>`. That clears the app's choice, so
 /// macOS asks again next time it wants access. System-wide grants need the password.
 pub fn revoke(grant: &Grant) -> Result<(), String> {
+    if grant.is_self {
+        return Err("That's PenCleaner's own permission; it needs it to work.".into());
+    }
     if grant.orphaned {
         return Err("The app is gone, so macOS can't reset this. It's harmless: the permission is locked to that app's signature.".into());
     }

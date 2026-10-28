@@ -198,6 +198,7 @@ const item = (name: string, kind: LaunchItem["kind"], extra: Partial<LaunchItem>
   appPath: null,
   appName: null,
   broken: false,
+  isSelf: false,
   ...extra,
 });
 
@@ -315,6 +316,7 @@ const grant = (label: string, appName: string, extra: Partial<Grant> = {}): Gran
   orphaned: false,
   revocable: !extra.orphaned,
   lockedToSigner: true,
+  isSelf: false,
   system: false,
   ...extra,
 });
@@ -332,7 +334,7 @@ function buildProtection(): ProtectionReport {
     suspicious: threat
       ? [
           {
-            item: { id: "com.apple.update.helper", name: "update", developer: null, kind: "agent", controllable: true, enabled: true, running: true, plist: `${HOME}/Library/LaunchAgents/com.apple.update.helper.plist`, executable: "/bin/sh", appPath: null, appName: null, broken: false },
+            item: { id: "com.apple.update.helper", name: "update", developer: null, kind: "agent", controllable: true, enabled: true, running: true, plist: `${HOME}/Library/LaunchAgents/com.apple.update.helper.plist`, executable: "/bin/sh", appPath: null, appName: null, broken: false, isSelf: false },
             program: `${HOME}/Library/.hidden/update.sh`,
             signer: { kind: "script" },
             severity: "high",
@@ -418,6 +420,7 @@ let mockSettings: Settings = {
   unusedAppDays: 180,
   checkUpdatesOnScan: true,
   onlineNotarization: true,
+  offerTrashedAppCleanup: true,
   ignore: location.hash.includes("ignored")
     ? [
         { kind: "path", value: `${HOME}/Sites/js/simpleworship`, label: "simpleworship", module: "settings", added: days(2) },

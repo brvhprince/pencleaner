@@ -3,13 +3,17 @@
 
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, PhysicalPosition, Rect, Runtime, WindowEvent};
+use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, Rect, Runtime, WindowEvent};
 
 pub const WINDOW: &str = "menubar";
+const TRAY: &str = "pencleaner";
+/// Full popover, and the compact card used for "you trashed an app".
+pub const FULL_HEIGHT: f64 = 590.0;
+pub const COMPACT_HEIGHT: f64 = 236.0;
 
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let icon = Image::from_bytes(include_bytes!("../icons/tray-template.png"))?;
-    TrayIconBuilder::with_id("pencleaner")
+    TrayIconBuilder::with_id(TRAY)
         .icon(icon)
         .icon_as_template(true)
         .tooltip("PenCleaner")
@@ -39,6 +43,21 @@ fn toggle<R: Runtime>(app: &AppHandle<R>, icon: Rect) {
         let _ = win.hide();
         return;
     }
+    let _ = win.set_size(LogicalSize::new(360.0, FULL_HEIGHT));
+    place_and_show(&win, icon);
+    let _ = tauri::Emitter::emit_to(&win, WINDOW, "menubar-shown", ());
+}
+
+/// Opens the popover under the menu bar icon at `height`, without a click.
+pub fn pop_up<R: Runtime>(app: &AppHandle<R>, height: f64) -> Option<()> {
+    let win = app.get_webview_window(WINDOW)?;
+    let icon = app.tray_by_id(TRAY)?.rect().ok()??;
+    let _ = win.set_size(LogicalSize::new(360.0, height));
+    place_and_show(&win, icon);
+    Some(())
+}
+
+fn place_and_show<R: Runtime>(win: &tauri::WebviewWindow<R>, icon: Rect) {
     // Centre the popover under the icon, kept on screen.
     let scale = win.scale_factor().unwrap_or(1.0);
     let pos = icon.position.to_physical::<f64>(scale);
@@ -53,7 +72,6 @@ fn toggle<R: Runtime>(app: &AppHandle<R>, icon: Rect) {
     let _ = win.set_position(PhysicalPosition::new(x, y));
     let _ = win.show();
     let _ = win.set_focus();
-    let _ = tauri::Emitter::emit_to(&win, WINDOW, "menubar-shown", ());
 }
 
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {

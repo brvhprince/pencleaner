@@ -2,7 +2,8 @@
   import { ArrowDown, ArrowUp, BatteryCharging, BatteryFull, BatteryLow, Cpu, HardDrive, Laptop, MemoryStick, Settings, ShieldCheck, ShieldOff, Sparkles, Trash, Wifi } from "@lucide/svelte";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
-  import { api, inTauri, type ActivityEvent, type Vitals } from "./lib/api";
+  import { api, inTauri, type ActivityEvent, type TrashedApp, type Vitals } from "./lib/api";
+  import { plural } from "./lib/format";
   import { ago, bytes } from "./lib/format";
 
   let v = $state<Vitals | null>(null);
@@ -11,6 +12,34 @@
   let events = $state<ActivityEvent[]>([]);
   let confirmTrash = $state(false);
   let emptying = $state(false);
+
+  // "You just trashed an app": a compact card instead of the full popover.
+  let trashed = $state<TrashedApp | null>(null);
+  let trashedIcon = $state<string | null>(null);
+  let trashedState = $state<"offer" | "removing" | "done">("offer");
+  let trashedResult = $state("");
+
+  async function offer(t: TrashedApp) {
+    trashed = t;
+    trashedState = "offer";
+    trashedIcon = await api.apps.icon(t.path).catch(() => null);
+  }
+
+  async function removeLeftovers() {
+    trashedState = "removing";
+    try {
+      const r = await api.trashedApp.remove();
+      trashedResult = `Moved ${bytes(r.bytesFreed)} of leftovers to the Trash.`;
+    } catch (e) {
+      trashedResult = String(e);
+    }
+    trashedState = "done";
+  }
+
+  function dismiss() {
+    api.trashedApp.dismiss();
+    trashed = null;
+  }
 
   async function refresh() {
     try {
@@ -47,12 +76,23 @@
     const onBlur = () => stop();
     window.addEventListener("focus", onFocus);
     window.addEventListener("blur", onBlur);
-    const off = inTauri ? listen("menubar-shown", start) : null;
+    const offs = inTauri
+      ? [
+          listen("menubar-shown", () => {
+            trashed = null;
+            start();
+          }),
+          listen<TrashedApp>("trashed-app", (e) => offer(e.payload)),
+        ]
+      : [];
+    if (location.hash.includes("trashed")) {
+      offer({ name: "Postman", bundleId: "com.postmanlabs.mac", path: "/Applications/Postman.app", size: 214e6, files: [{ path: "~/Library/Application Support/Postman", label: "Application Support", size: 210e6, admin: false }, { path: "~/Library/Caches/com.postmanlabs.mac", label: "Caches", size: 4e6, admin: false }] });
+    }
     return () => {
       stop();
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("blur", onBlur);
-      off?.then((f) => f());
+      for (const off of offs) off.then((f) => f());
     };
   });
 
@@ -104,6 +144,30 @@
   const healthWord = { good: "Good", fair: "Fair", attention: "Needs Attention" } as const;
 </script>
 
+{#if trashed}
+  <div class="pop compact">
+    <h1>Uninstall {trashed.name} completely?</h1>
+    <p class="lede">You moved it to the Trash, but it left files behind in your Library.</p>
+    <div class="card leftover">
+      {#if trashedIcon}<img src={trashedIcon} alt="" />{:else}<span class="ph"><Trash size={18} /></span>{/if}
+      <span class="rtext">
+        <strong>{trashed.name}</strong>
+        <span>{plural(trashed.files.length, "leftover")} · {bytes(trashed.size)}</span>
+      </span>
+    </div>
+    {#if trashedState === "done"}
+      <p class="lede result">{trashedResult}</p>
+      <div class="actions"><button class="btn" onclick={dismiss}>Done</button></div>
+    {:else}
+      <div class="actions">
+        <button class="btn ghost" disabled={trashedState === "removing"} onclick={dismiss}>Keep Them</button>
+        <button class="btn primary" disabled={trashedState === "removing"} onclick={removeLeftovers}>
+          {trashedState === "removing" ? "Removing…" : "Remove Leftovers"}
+        </button>
+      </div>
+    {/if}
+  </div>
+{:else}
 <div class="pop">
   <header>
     <div>
@@ -188,8 +252,47 @@
     <button class="gear" title="Settings" onclick={() => api.showMain("settings")}><Settings size={15} /></button>
   </footer>
 </div>
+{/if}
 
 <style>
+  .compact {
+    gap: 10px;
+    padding: 16px;
+  }
+  .compact h1 {
+    font-size: 15px;
+  }
+  .lede {
+    font-size: 12px;
+    color: var(--text-2);
+    margin-top: -4px;
+  }
+  .lede.result {
+    margin-top: 0;
+    color: #fff;
+  }
+  .leftover {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .leftover img,
+  .ph {
+    width: 36px;
+    height: 36px;
+  }
+  .ph {
+    display: grid;
+    place-items: center;
+  }
+  .actions {
+    margin-top: auto;
+    display: flex;
+    justify-content: space-between;
+  }
+  .actions:has(> :only-child) {
+    justify-content: flex-end;
+  }
   :global(html.menubar),
   :global(html.menubar body),
   :global(html.menubar #app) {

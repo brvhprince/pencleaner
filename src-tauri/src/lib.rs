@@ -1,6 +1,7 @@
 mod commands;
 mod menu;
 mod menubar;
+mod trash_watch;
 
 use commands::AppState;
 
@@ -19,6 +20,7 @@ pub fn run() {
         .manage(AppState::default())
         .setup(|app| {
             menubar::install(app.handle())?;
+            trash_watch::start(app.handle().clone());
             Ok(())
         })
         .on_window_event(|win, event| {
@@ -89,6 +91,8 @@ pub fn run() {
             commands::vitals,
             commands::show_main,
             commands::empty_trash,
+            commands::trashed_app_remove,
+            commands::trashed_app_dismiss,
         ])
         .build(tauri::generate_context!())
         .expect("error while building PenCleaner")

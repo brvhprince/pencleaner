@@ -44,6 +44,8 @@ pub struct LaunchItem {
     pub app_name: Option<String>,
     /// Its plist or program no longer exists.
     pub broken: bool,
+    /// PenCleaner's own background watcher: switched in PenCleaner's Settings, not here.
+    pub is_self: bool,
 }
 
 #[derive(Default)]
@@ -158,6 +160,7 @@ fn from_btm(dump: &str, running: &HashSet<String>) -> Vec<LaunchItem> {
                 kind,
                 controllable: legacy && plist.is_some(),
                 broken: plist.as_deref().is_some_and(|p| !Path::new(p).exists()),
+                is_self: false,
                 app_name: parent.map(|(n, _)| (*n).to_owned()).filter(|n| !n.is_empty()),
                 app_path: parent.map(|(_, a)| a.clone()),
                 id: label,
@@ -201,9 +204,14 @@ fn merge(mut items: Vec<LaunchItem>, btm: Vec<LaunchItem>) -> Vec<LaunchItem> {
             None => items.push(b),
         }
     }
+    for i in &mut items {
+        i.is_self = crate::protection::persistence::is_our_watcher(i);
+    }
     items.sort_by_key(|i| (i.kind as u8, !i.enabled, i.name.to_lowercase()));
     items
 }
+
+const SELF_MSG: &str = "That's PenCleaner's own background watcher. Turn it off in PenCleaner's Settings → Protection.";
 
 fn run(cmd: &str, args: &[&str]) -> String {
     Command::new(cmd).args(args).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
@@ -289,6 +297,7 @@ pub fn list(open_at_login_apps: bool) -> Vec<LaunchItem> {
             plist: None,
             executable: None,
             broken: !Path::new(&path).exists(),
+            is_self: false,
             app_name: Some(name.clone()),
             app_path: Some(path),
             name,
@@ -318,6 +327,7 @@ fn from_bundles(loaded: &HashSet<String>, running: &HashSet<String>) -> Vec<Laun
             app_path: Some(app.path.to_string_lossy().into_owned()),
             app_name: Some(app.name.clone()),
             broken: false,
+            is_self: false,
         };
         for helper in std::fs::read_dir(lib.join("LoginItems")).into_iter().flatten().flatten().map(|e| e.path()) {
             if let Some(h) = crate::apps::read_bundle(&helper).filter(|h| loaded.contains(&h.bundle_id)) {
@@ -385,6 +395,7 @@ pub fn from_plists(disabled: &HashSet<String>, running: &HashSet<String>) -> Vec
                 app_name: app_path.as_deref().and_then(|a| crate::apps::read_bundle(Path::new(a))).map(|a| a.name),
                 app_path,
                 broken,
+                is_self: false,
             });
         }
     }
@@ -413,6 +424,9 @@ fn exec(argv: &[String], admin: bool) -> Result<(), String> {
 
 /// Turns a plist-based item on or off. Reversible: the plist stays where it is.
 pub fn set_enabled(item: &LaunchItem, enabled: bool) -> Result<(), String> {
+    if item.is_self {
+        return Err(SELF_MSG.into());
+    }
     let Some(plist) = item.plist.as_deref().filter(|_| item.controllable) else {
         return Err("This item was registered by its app. Switch it off in System Settings → Login Items.".into());
     };
@@ -433,6 +447,9 @@ pub fn set_enabled(item: &LaunchItem, enabled: bool) -> Result<(), String> {
 
 /// Stops the item and moves its plist (or login entry) away.
 pub fn remove(item: &LaunchItem) -> Result<(), String> {
+    if item.is_self {
+        return Err(SELF_MSG.into());
+    }
     if let Some(name) = item.id.strip_prefix("login:") {
         let script = format!(r#"tell application "System Events" to delete login item "{}""#, name.replace('"', "\\\""));
         return exec(&["/usr/bin/osascript".into(), "-e".into(), script], false);
@@ -520,6 +537,7 @@ mod tests {
             app_path: None,
             app_name: None,
             broken: false,
+            is_self: false,
         }];
         let merged = merge(scanned, btm);
         assert_eq!(merged.len(), 2, "kafka merged, helper added");

@@ -145,7 +145,9 @@
                     {/if}
                   </span>
                 </span>
-                {#if g.revocable}
+                {#if g.isSelf}
+                  <span class="harmless self">This app</span>
+                {:else if g.revocable}
                   <button class="act" disabled={protection.busy.has(g.id)} onclick={() => protection.revoke(g)}>Revoke</button>
                 {:else if g.orphaned && g.lockedToSigner}
                   <span class="harmless">Harmless</span>
@@ -316,6 +318,9 @@
     font-size: 12px;
     font-weight: 600;
     color: #2f7d4a;
+  }
+  .harmless.self {
+    color: var(--m-muted);
   }
   .grant {
     min-height: 50px;

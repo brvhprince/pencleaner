@@ -117,6 +117,13 @@
           </span>
           {#if watcher !== null}<Switch on={watcher} label="Background watcher" onchange={setWatcher} />{/if}
         </div>
+        <div class="row">
+          <span>
+            <strong>Offer to clean up after apps you trash</strong>
+            <em>Drag an app to the Trash and PenCleaner offers to remove its leftovers</em>
+          </span>
+          <Switch on={s.offerTrashedAppCleanup} label="Clean up after trashed apps" onchange={(v) => app.saveSettings({ offerTrashedAppCleanup: v })} />
+        </div>
       </div>
     </div>
 

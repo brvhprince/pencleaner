@@ -203,6 +203,7 @@ mod tests {
             app_path: None,
             app_name: None,
             broken: false,
+            is_self: false,
         };
         assert!(is_our_watcher(&mk(super::super::watch::LABEL, &me)));
         assert!(!is_our_watcher(&mk(super::super::watch::LABEL, "/tmp/impostor")), "copycat label");
@@ -254,6 +255,7 @@ mod tests {
             app_path: None,
             app_name: None,
             broken: false,
+            is_self: false,
         };
         let f = analyze(&item, true).expect("flagged");
         assert_eq!(f.severity, Severity::High);

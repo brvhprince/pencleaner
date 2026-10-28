@@ -6,6 +6,7 @@
   import Checkbox from "../../lib/components/Checkbox.svelte";
   import Switch from "../../lib/components/Switch.svelte";
   import { ago, bytes, plural } from "../../lib/format";
+  import { app } from "../../lib/state.svelte";
   import MemoryBar from "./MemoryBar.svelte";
   import { SECTIONS, perf } from "./perf.svelte";
 
@@ -52,7 +53,11 @@
       </span>
       <span class="detail" title={i.plist ?? i.executable ?? ""}>{owner(i) || i.plist || i.executable}</span>
     </span>
-    {#if i.controllable}
+    {#if i.isSelf}
+      <button class="settings" onclick={() => app.go("settings")} title="PenCleaner's own watcher. Switch it in Settings → Protection">
+        PenCleaner · Settings
+      </button>
+    {:else if i.controllable}
       {#if i.plist}
         <Switch on={i.enabled} label="{i.name} enabled" busy={perf.busyItem === i.id} onchange={(v) => perf.setItem(i, v)} />
       {/if}

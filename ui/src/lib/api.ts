@@ -237,6 +237,7 @@ export interface LaunchItem {
   appPath: string | null;
   appName: string | null;
   broken: boolean;
+  isSelf: boolean;
 }
 
 export interface Snapshot {
@@ -359,6 +360,7 @@ export interface Grant {
   orphaned: boolean;
   revocable: boolean;
   lockedToSigner: boolean;
+  isSelf: boolean;
   system: boolean;
 }
 
@@ -409,6 +411,7 @@ export interface Settings {
   unusedAppDays: number;
   checkUpdatesOnScan: boolean;
   onlineNotarization: boolean;
+  offerTrashedAppCleanup: boolean;
   ignore: IgnoreRule[];
 }
 
@@ -429,6 +432,14 @@ export interface Vitals {
   health: "good" | "fair" | "attention";
 }
 
+export interface TrashedApp {
+  name: string;
+  bundleId: string;
+  path: string;
+  files: RelatedFile[];
+  size: number;
+}
+
 export interface AboutInfo {
   version: string;
   commit: string;
@@ -445,6 +456,10 @@ const tauriApi = {
   vitals: () => invoke<Vitals>("vitals"),
   showMain: (module?: string) => invoke<void>("show_main", { module }),
   emptyTrash: () => invoke<number>("empty_trash"),
+  trashedApp: {
+    remove: () => invoke<CleanSummary>("trashed_app_remove"),
+    dismiss: () => invoke<void>("trashed_app_dismiss"),
+  },
   settings: {
     get: () => invoke<Settings>("settings_get"),
     save: (settings: Settings) => invoke<Settings>("settings_save", { settings }),
@@ -569,6 +584,10 @@ const mockApi: typeof tauriApi = {
   vitals: mock.vitals,
   showMain: async () => {},
   emptyTrash: async () => 2.4e9,
+  trashedApp: {
+    remove: async () => ({ cleaned: ["x"], failed: [], bytesFreed: 214e6, byCategory: {} }) as CleanSummary,
+    dismiss: async () => {},
+  },
   settings: mock.settings,
   about: async () => ({ version: "0.1.0", commit: "b39b86b+", builtAt: Date.now() / 1000 - 3600, macos: "26.6.2", arch: "Intel", fullDiskAccess: true, xprotect: "5368" }),
   volumes: mock.volumes,
