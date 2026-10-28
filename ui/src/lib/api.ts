@@ -271,7 +271,7 @@ export interface TaskResult {
 
 export interface ActivityEvent {
   at: number;
-  module: "cleanup" | "clutter" | "applications" | "spacelens" | "performance";
+  module: "cleanup" | "clutter" | "applications" | "spacelens" | "performance" | "protection";
   action: string;
   bytes: number;
   items: number;
@@ -310,13 +310,102 @@ export type UpdateEvent =
   | { status: "done"; id: string; message: string }
   | { status: "failed"; id: string; error: string };
 
+export interface Detection {
+  file: string;
+  target: string;
+  rule: string;
+  description: string | null;
+}
+
+export type Signer =
+  | { kind: "apple" }
+  | { kind: "developer"; name: string; team: string; notarized: boolean }
+  | { kind: "homebrew" }
+  | { kind: "adHoc" }
+  | { kind: "unsigned" }
+  | { kind: "script" };
+
+export interface Finding {
+  item: LaunchItem;
+  program: string;
+  signer: Signer;
+  severity: "high" | "medium";
+  reasons: string[];
+}
+
+export interface PrivacyItem {
+  id: string;
+  owner: string;
+  appPath: string | null;
+  trace: "history" | "cookies" | "autofill" | "recentItems";
+  title: string;
+  detail: string;
+  size: number;
+  recommended: boolean;
+  warning: string | null;
+  running: boolean;
+}
+
+export interface Grant {
+  id: string;
+  service: string;
+  label: string;
+  settingsAnchor: string;
+  client: string;
+  appName: string;
+  appPath: string | null;
+  target: string | null;
+  granted: number | null;
+  orphaned: boolean;
+  revocable: boolean;
+  lockedToSigner: boolean;
+  system: boolean;
+}
+
+export interface WatchAlert {
+  at: number;
+  id: string;
+  name: string;
+  plist: string;
+  program: string | null;
+  severity: "high" | "medium" | null;
+  reasons: string[];
+  malware: string | null;
+}
+
+export interface ProtectionReport {
+  rules: { version: string | null; rules: number } | null;
+  filesScanned: number;
+  detections: Detection[];
+  suspicious: Finding[];
+  privacy: PrivacyItem[];
+  permissions: Grant[];
+  permissionsError: string | null;
+  watcher: boolean;
+  alerts: WatchAlert[];
+  errors: string[];
+  elapsedMs: number;
+  cancelled: boolean;
+}
+
 /** URL for showing a local image in the webview. */
 export function fileSrc(path: string) {
   return inTauri ? convertFileSrc(path) : mock.thumb(path);
 }
 
+export interface AboutInfo {
+  version: string;
+  commit: string;
+  builtAt: number;
+  macos: string;
+  arch: string;
+  fullDiskAccess: boolean;
+  xprotect: string | null;
+}
+
 const tauriApi = {
   systemInfo: () => invoke<SystemInfo>("system_info"),
+  about: () => invoke<AboutInfo>("about_info"),
   volumes: () => invoke<Volume[]>("volumes_list"),
   openFullDiskAccessSettings: () => invoke<void>("open_full_disk_access_settings"),
   revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),
@@ -395,6 +484,7 @@ const tauriApi = {
       ch.onmessage = onStart;
       return invoke<TaskResult[]>("perf_run_tasks", { ids, onStart: ch });
     },
+    fullItems: () => invoke<LaunchItem[]>("perf_full_items"),
     setItem: (id: string, enabled: boolean) => invoke<LaunchItem[]>("perf_set_item", { id, enabled }),
     removeItem: (id: string) => invoke<LaunchItem[]>("perf_remove_item", { id }),
     deleteSnapshots: (ids: string[]) => invoke<{ snapshots: Snapshot[]; purgeable: number | null }>("perf_delete_snapshots", { ids }),
@@ -406,6 +496,21 @@ const tauriApi = {
     clear: () => invoke<void>("activity_clear"),
   },
 
+  protection: {
+    scan(onProgress: (p: Progress) => void) {
+      const ch = new Channel<Progress>();
+      ch.onmessage = onProgress;
+      return invoke<ProtectionReport>("protection_scan", { onProgress: ch });
+    },
+    cancel: () => invoke<void>("protection_cancel"),
+    remove: (kind: "detection" | "suspicious", id: string) => invoke<void>("protection_remove", { kind, id }),
+    cleanPrivacy: (ids: string[]) => invoke<{ cleaned: string[]; failed: [string, string][]; bytes: number }>("privacy_clean", { ids }),
+    revoke: (id: string) => invoke<Grant[]>("permission_revoke", { id }),
+    openSettings: (anchor: string) => invoke<void>("open_privacy_settings", { anchor }),
+    setWatcher: (enabled: boolean) => invoke<{ enabled: boolean; alerts: WatchAlert[] }>("watcher_set", { enabled }),
+    clearAlerts: () => invoke<void>("watcher_clear_alerts"),
+  },
+
   remove(items: { path: string; size?: number }[], mode: RemoveMode, onEvent: (e: RemoveEvent) => void) {
     const ch = new Channel<RemoveEvent>();
     ch.onmessage = onEvent;
@@ -415,6 +520,7 @@ const tauriApi = {
 
 const mockApi: typeof tauriApi = {
   systemInfo: mock.systemInfo,
+  about: async () => ({ version: "0.1.0", commit: "b39b86b+", builtAt: Date.now() / 1000 - 3600, macos: "26.6.2", arch: "Intel", fullDiskAccess: true, xprotect: "5368" }),
   volumes: mock.volumes,
   openFullDiskAccessSettings: async () => {},
   revealInFinder: async () => {},
@@ -446,6 +552,7 @@ const mockApi: typeof tauriApi = {
     openAppStoreUpdates: async () => {},
   },
   perf: mock.perf,
+  protection: mock.protection,
   activity: mock.activity,
   remove: (items, _mode, onEvent) => mock.remove(items, onEvent),
 };

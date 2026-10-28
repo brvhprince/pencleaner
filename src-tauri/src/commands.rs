@@ -6,6 +6,7 @@ use pencleaner_core::cleanup::{self, Category, CleanEvent, CleanSummary, Report}
 use pencleaner_core::activity::{self, Event};
 use pencleaner_core::applications::{self, AppsReport, Target};
 use pencleaner_core::clutter::{self, ClutterReport};
+use pencleaner_core::protection::{self, permissions as app_permissions, privacy, watch, ProtectionReport};
 use pencleaner_core::updater::{self, UpdateEvent, UpdatesReport};
 use pencleaner_core::performance::{self, items::LaunchItem, memory, PerfReport, TaskResult};
 use pencleaner_core::progress::{Progress, ScanControl};
@@ -51,6 +52,8 @@ pub struct AppState {
     icons: Mutex<HashMap<String, Option<String>>>,
     perf: RwLock<Option<PerfReport>>,
     updates: RwLock<Option<UpdatesReport>>,
+    protection: RwLock<Option<ProtectionReport>>,
+    protection_ctl: Mutex<Option<Arc<ScanControl>>>,
 }
 
 #[derive(Serialize)]
@@ -72,6 +75,40 @@ pub fn system_info() -> SystemInfo {
         user: home.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         home: home.to_string_lossy().into_owned(),
         dev_build: cfg!(debug_assertions),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AboutInfo {
+    version: String,
+    /// Short commit hash; "+" when built with uncommitted changes.
+    commit: &'static str,
+    built_at: u64,
+    macos: String,
+    arch: &'static str,
+    full_disk_access: bool,
+    xprotect: Option<String>,
+}
+
+#[tauri::command]
+pub fn about_info(app: AppHandle) -> AboutInfo {
+    let macos = Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .unwrap_or_default();
+    let xprotect = plist::Value::from_file("/Library/Apple/System/Library/CoreServices/XProtect.bundle/Contents/version.plist")
+        .ok()
+        .and_then(|v| v.as_dictionary()?.get("CFBundleShortVersionString")?.as_string().map(str::to_owned));
+    AboutInfo {
+        version: app.package_info().version.to_string(),
+        commit: env!("PENCLEANER_COMMIT"),
+        built_at: env!("PENCLEANER_BUILT_AT").parse().unwrap_or(0),
+        macos,
+        arch: if cfg!(target_arch = "aarch64") { "Apple Silicon" } else { "Intel" },
+        full_disk_access: permissions::has_full_disk_access(),
+        xprotect,
     }
 }
 
@@ -394,6 +431,20 @@ fn refresh_items(app: &AppHandle) -> Vec<LaunchItem> {
     items
 }
 
+/// The full System Settings list (asks for the password). Replaces the scan's items.
+#[tauri::command]
+pub async fn perf_full_items(app: AppHandle) -> CmdResult<Vec<LaunchItem>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = performance::items::full_list(true)?;
+        if let Some(r) = app.state::<AppState>().perf.write().as_mut() {
+            r.items = items.clone();
+        }
+        Ok(items)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn perf_set_item(app: AppHandle, id: String, enabled: bool) -> CmdResult<Vec<LaunchItem>> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -493,4 +544,120 @@ pub async fn updates_install(app: AppHandle, ids: Vec<String>, on_event: Channel
 #[tauri::command]
 pub fn open_app_store_updates() -> CmdResult<()> {
     open(&["macappstore://showUpdatesPage"])
+}
+
+#[tauri::command]
+pub async fn protection_scan(app: AppHandle, on_progress: Channel<Progress>) -> CmdResult<ProtectionReport> {
+    let state = app.state::<AppState>();
+    let ctl = Arc::new(ScanControl::new());
+    *state.protection_ctl.lock() = Some(ctl.clone());
+    let done = stream_progress(ctl.clone(), on_progress);
+    let result = tauri::async_runtime::spawn_blocking(move || protection::scan(&ctl)).await.map_err(|e| e.to_string());
+    done.store(true, Ordering::Relaxed);
+    *state.protection_ctl.lock() = None;
+    let report = result?;
+    *state.protection.write() = (!report.cancelled).then(|| report.clone());
+    Ok(report)
+}
+
+#[tauri::command]
+pub fn protection_cancel(state: State<'_, AppState>) {
+    if let Some(ctl) = state.protection_ctl.lock().as_ref() {
+        ctl.cancel();
+    }
+}
+
+/// Removes a malware detection (by its target path) or a suspicious item (by label).
+#[tauri::command]
+pub async fn protection_remove(app: AppHandle, kind: String, id: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut guard = state.protection.write();
+        let report = guard.as_mut().ok_or("Scan again first")?;
+        let (result, action) = match kind.as_str() {
+            "detection" => (report.remove_detection(&id), "Removed malware"),
+            _ => (report.remove_suspicious(&id), "Removed a suspicious item"),
+        };
+        result?;
+        record(&app, "protection", action, 0, 1, Some(id));
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyResult {
+    cleaned: Vec<String>,
+    failed: Vec<(String, String)>,
+    bytes: u64,
+}
+
+#[tauri::command]
+pub async fn privacy_clean(app: AppHandle, ids: Vec<String>) -> CmdResult<PrivacyResult> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut guard = state.protection.write();
+        let report = guard.as_mut().ok_or("Scan again first")?;
+        let wanted: HashSet<String> = ids.into_iter().collect();
+        let r = privacy::clean(&report.privacy, &wanted);
+        report.privacy.retain(|i| !r.cleaned.contains(&i.id));
+        record(&app, "protection", "Cleared privacy traces", r.bytes, r.cleaned.len(), None);
+        Ok(PrivacyResult { cleaned: r.cleaned, failed: r.failed, bytes: r.bytes })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Revokes one permission and returns the refreshed list.
+#[tauri::command]
+pub async fn permission_revoke(app: AppHandle, id: String) -> CmdResult<Vec<app_permissions::Grant>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let grant = {
+            let guard = state.protection.read();
+            guard.as_ref().and_then(|r| r.permissions.iter().find(|g| g.id == id).cloned()).ok_or("Not in the last scan")?
+        };
+        app_permissions::revoke(&grant)?;
+        record(&app, "protection", "Revoked a permission", 0, 1, Some(format!("{}: {}", grant.label, grant.app_name)));
+        let fresh = app_permissions::scan()?;
+        if let Some(r) = state.protection.write().as_mut() {
+            r.permissions = fresh.clone();
+        }
+        Ok(fresh)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn open_privacy_settings(anchor: String) -> CmdResult<()> {
+    if !anchor.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err("bad anchor".into());
+    }
+    open(&[&app_permissions::settings_url(&anchor)])
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatcherState {
+    enabled: bool,
+    alerts: Vec<watch::Alert>,
+}
+
+#[tauri::command]
+pub fn watcher_set(enabled: bool) -> CmdResult<WatcherState> {
+    if enabled {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        watch::enable(&exe, &watch::data_dir())?;
+    } else {
+        watch::disable()?;
+    }
+    Ok(WatcherState { enabled: watch::is_enabled(), alerts: watch::alerts(&watch::data_dir()) })
+}
+
+#[tauri::command]
+pub fn watcher_clear_alerts() {
+    watch::clear_alerts(&watch::data_dir());
 }

@@ -18,6 +18,10 @@ import {
   Package,
   Power,
   Rocket,
+  ShieldCheck,
+  Bug,
+  EyeOff,
+  KeyRound,
   ScanSearch,
   Sparkles,
   SprayCan,
@@ -28,6 +32,7 @@ import {
 export type ModuleId =
   | "smartcare"
   | "cleanup"
+  | "protection"
   | "performance"
   | "applications"
   | "clutter"
@@ -96,6 +101,20 @@ export const MODULES: ModuleDef[] = [
       { icon: Trash, label: "Trash Bins" },
     ],
     theme: theme("#0c2614", "#1d5228", "#3d8a39", "#58a849", "#6fcf5a", "#9be686"),
+  },
+  {
+    id: "protection",
+    title: "Protection",
+    tagline: "Check your Mac for malware, sneaky background items and privacy traces, all on this Mac.",
+    icon: ShieldCheck,
+    illustration: "secrets",
+    features: [
+      { icon: Bug, label: "Malware Scan" },
+      { icon: Rocket, label: "Suspicious Background Items" },
+      { icon: EyeOff, label: "Privacy" },
+      { icon: KeyRound, label: "App Permissions" },
+    ],
+    theme: theme("#2a0718", "#5e1238", "#9a2457", "#c23a70", "#ff6fa1", "#ff9fc2"),
   },
   {
     id: "performance",

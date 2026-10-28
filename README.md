@@ -24,6 +24,8 @@ cargo run --release -p pencleaner-core --example clutter [folder]    # My Clutte
 cargo run --release -p pencleaner-core --example apps                # Applications dry run (never deletes)
 cargo run --release -p pencleaner-core --example perf                # Performance readout (runs no tasks)
 cargo run --release -p pencleaner-core --example updates             # App Updater check (installs nothing)
+cargo run --profile scan -p pencleaner-core --example protect        # malware + background-item scan (removes nothing)
+cargo run --profile scan -p pencleaner-core --example protect -- --privacy   # privacy traces + app permissions
 cargo run --release -p pencleaner-core --example verify_update -- /Applications/Maccy.app
                                                                      # full download + verification, no install
 ```
@@ -43,6 +45,7 @@ drives Space Lens through every state against the mock backend, and
 | Smart Care | One scan across Cleanup, Performance and app leftovers; runs only safe, recommended items |
 | Cleanup | System, developer, AI, Mail and Trash junk |
 | Performance | Maintenance tasks, memory, login and background items, Time Machine snapshots |
+| Protection | Malware scan with Apple's XProtect rules, suspicious background items, privacy traces, app permissions, background watcher |
 | Applications | Uninstaller with support files, App Updater, leftovers of removed apps, installer files |
 | My Clutter | Duplicates, similar images, large and old files, Downloads |
 | Space Lens | Bubble map of what's using the disk |

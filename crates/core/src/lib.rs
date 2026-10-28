@@ -12,6 +12,7 @@ pub mod imaging;
 pub mod performance;
 pub mod permissions;
 pub mod privileged;
+pub mod protection;
 pub mod progress;
 pub mod remove;
 pub mod safety;

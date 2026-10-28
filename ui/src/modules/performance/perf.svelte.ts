@@ -48,6 +48,7 @@ class Perf {
     try {
       this.report = await api.perf.scan();
       this.chosen.clear();
+      this.fullListAt = null;
       for (const t of this.recommended) this.chosen.add(t.id);
       this.taskState.clear();
       this.taskResult.clear();
@@ -98,6 +99,23 @@ class Perf {
       app.toast(`Tasks stopped: ${e}`, "error");
     } finally {
       this.running = false;
+    }
+  }
+
+  /** When the full System Settings list was last loaded (it asks for a password). */
+  fullListAt = $state<number | null>(null);
+  loadingFull = $state(false);
+
+  async loadFullList() {
+    this.loadingFull = true;
+    try {
+      this.setItems(await api.perf.fullItems());
+      this.fullListAt = Date.now();
+      app.toast("Showing the full list from System Settings.", "success");
+    } catch (e) {
+      app.toast(String(e), "error");
+    } finally {
+      this.loadingFull = false;
     }
   }
 

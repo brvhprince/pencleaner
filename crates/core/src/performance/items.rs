@@ -1,6 +1,11 @@
-//! Login and background items, from the same Background Task Management database that
-//! System Settings → General → Login Items shows (`sfltool dumpbtm`, readable without
-//! root), plus launchd's own state for what is running or disabled.
+//! Login and background items, read without any password: launchd plists from disk,
+//! login items and services that apps register from inside their bundles (matched
+//! against what launchd has loaded), and classic "Open at Login" apps.
+//!
+//! `sfltool dumpbtm` has the full Background Task Management list (what System Settings
+//! shows, with developer names and switched-off items), but on recent macOS it needs an
+//! administrator password. So it's never part of a scan, only `full_list`, which the
+//! user starts and approves.
 
 use crate::privileged;
 use crate::remove::{RemoveMode, Remover};
@@ -111,6 +116,95 @@ fn label_of(identifier: &str) -> &str {
     }
 }
 
+/// Items from a BTM dump, the way System Settings sees them.
+fn from_btm(dump: &str, running: &HashSet<String>) -> Vec<LaunchItem> {
+    let uid = unsafe { libc::getuid() } as i64;
+    let recs = parse(dump, &[uid, -2, 0]);
+    let apps: HashMap<&str, (&str, String)> = recs
+        .iter()
+        .filter(|r| r.get("Type").is_some_and(|t| t.starts_with("app")))
+        .filter_map(|r| Some((r.get("Identifier")?, (r.get("Name").unwrap_or(""), decode_url(r.get("URL")?)))))
+        .collect();
+    recs.iter()
+        .filter_map(|r| {
+            let ty = r.get("Type")?;
+            let kind = if ty.starts_with("login item") {
+                ItemKind::LoginItem
+            } else if ty.contains("daemon") {
+                ItemKind::Daemon
+            } else if ty.contains("agent") {
+                ItemKind::Agent
+            } else {
+                return None;
+            };
+            let legacy = ty.starts_with("legacy");
+            let parent = r.get("Parent Identifier").and_then(|p| apps.get(p));
+            let resolve = |rel: &str| {
+                let p = decode_url(rel);
+                match parent {
+                    Some((_, app)) if !p.starts_with('/') => format!("{app}/{p}"),
+                    _ => p,
+                }
+            };
+            let label = label_of(r.get("Identifier")?).to_owned();
+            let plist = legacy.then(|| r.get("URL").map(resolve)).flatten();
+            let executable = r.get("Executable Path").map(resolve);
+            let disposition = r.get("Disposition").unwrap_or("");
+            Some(LaunchItem {
+                running: running.contains(&label),
+                enabled: disposition.starts_with("[enabled") || disposition.contains(" enabled"),
+                name: r.get("Name").map(str::to_owned).unwrap_or_else(|| label.clone()),
+                developer: r.get("Developer Name").map(str::to_owned),
+                kind,
+                controllable: legacy && plist.is_some(),
+                broken: plist.as_deref().is_some_and(|p| !Path::new(p).exists()),
+                app_name: parent.map(|(n, _)| (*n).to_owned()).filter(|n| !n.is_empty()),
+                app_path: parent.map(|(_, a)| a.clone()),
+                id: label,
+                plist,
+                executable,
+            })
+        })
+        .collect()
+}
+
+/// The scan list plus everything System Settings knows: developer names, its on/off
+/// state, and items apps registered but you switched off. Asks for the administrator
+/// password (sfltool needs it), so only run it when the user asks.
+pub fn full_list(open_at_login_apps: bool) -> Result<Vec<LaunchItem>, String> {
+    let dump = privileged::run_as_admin_output(
+        &[vec!["/usr/bin/sfltool".into(), "dumpbtm".into()]],
+        "PenCleaner needs your password to read the full list of login and background items from macOS.",
+        Some(std::time::Duration::from_secs(180)),
+    )?;
+    let (_, running) = launchd_state();
+    let btm = from_btm(&dump, &running);
+    if btm.is_empty() {
+        return Err("macOS returned an empty list.".into());
+    }
+    Ok(merge(list(open_at_login_apps), btm))
+}
+
+/// Folds BTM details into the scan list; BTM-only items are appended.
+fn merge(mut items: Vec<LaunchItem>, btm: Vec<LaunchItem>) -> Vec<LaunchItem> {
+    for b in btm {
+        match items.iter_mut().find(|i| i.id == b.id) {
+            Some(i) => {
+                i.developer = i.developer.take().or(b.developer);
+                i.app_name = i.app_name.take().or(b.app_name);
+                i.app_path = i.app_path.take().or(b.app_path);
+                // App-registered items: System Settings' switch is the truth.
+                if !i.controllable {
+                    i.enabled = b.enabled;
+                }
+            }
+            None => items.push(b),
+        }
+    }
+    items.sort_by_key(|i| (i.kind as u8, !i.enabled, i.name.to_lowercase()));
+    items
+}
+
 fn run(cmd: &str, args: &[&str]) -> String {
     Command::new(cmd).args(args).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
 }
@@ -124,36 +218,39 @@ fn disabled_labels(domain: &str) -> HashSet<String> {
         .collect()
 }
 
-/// Labels with a live process, in the user and system domains.
-fn running_labels() -> HashSet<String> {
-    let mut out: HashSet<String> = run("/bin/launchctl", &["list"])
-        .lines()
-        .skip(1)
-        .filter_map(|l| {
-            let mut cols = l.split_whitespace();
-            let pid = cols.next()?;
-            let label = cols.nth(1)?;
-            (pid != "-").then(|| label.to_owned())
-        })
-        .collect();
+/// Labels launchd has loaded, and those with a live process, in the user and system
+/// domains. Loaded = enabled, even when not running right now.
+fn launchd_state() -> (HashSet<String>, HashSet<String>) {
+    let (mut loaded, mut running) = (HashSet::new(), HashSet::new());
+    for l in run("/bin/launchctl", &["list"]).lines().skip(1) {
+        let mut cols = l.split_whitespace();
+        if let (Some(pid), Some(_), Some(label)) = (cols.next(), cols.next(), cols.next()) {
+            loaded.insert(label.to_owned());
+            if pid != "-" {
+                running.insert(label.to_owned());
+            }
+        }
+    }
     let system = run("/bin/launchctl", &["print", "system"]);
     let services = system.split("services = {").nth(1).unwrap_or("").split('}').next().unwrap_or("");
     for l in services.lines() {
         let mut cols = l.split_whitespace();
         if let (Some(pid), Some(_), Some(label)) = (cols.next(), cols.next(), cols.next()) {
+            loaded.insert(label.to_owned());
             if pid.parse::<u32>().is_ok_and(|p| p > 0) {
-                out.insert(label.to_owned());
+                running.insert(label.to_owned());
             }
         }
     }
-    out
+    (loaded, running)
 }
 
 /// "Open at Login" apps, via System Events. macOS asks once for permission to control
 /// System Events; if that's declined this returns nothing.
 fn open_at_login() -> Vec<(String, String)> {
     let script = r#"tell application "System Events" to get {name, path} of every login item"#;
-    let out = run("/usr/bin/osascript", &["-e", script]);
+    // The first call shows a permission dialog; don't let an unanswered one stall a scan.
+    let out = crate::fsutil::run_with_timeout("/usr/bin/osascript", &["-e", script], std::time::Duration::from_secs(15)).unwrap_or_default();
     // AppleScript lists come back as "a, b, c, /p/a, /p/b, /p/c".
     let parts: Vec<&str> = out.trim().split(", ").filter(|s| !s.is_empty()).collect();
     let half = parts.len() / 2;
@@ -166,74 +263,15 @@ fn open_at_login() -> Vec<(String, String)> {
 /// `open_at_login_apps` also asks System Events for classic "Open at Login" apps, which
 /// shows a one-time macOS permission prompt.
 pub fn list(open_at_login_apps: bool) -> Vec<LaunchItem> {
-    let uid = unsafe { libc::getuid() } as i64;
-    let dump = run("/usr/bin/sfltool", &["dumpbtm"]);
-    let recs = parse(&dump, &[uid, -2, 0]);
-
-    // Parent apps by identifier, to name items and resolve their relative paths.
-    let apps: HashMap<&str, (&str, String)> = recs
-        .iter()
-        .filter(|r| r.get("Type").is_some_and(|t| t.starts_with("app")))
-        .filter_map(|r| Some((r.get("Identifier")?, (r.get("Name").unwrap_or(""), decode_url(r.get("URL")?)))))
-        .collect();
+    let uid = unsafe { libc::getuid() };
     let disabled: HashSet<String> = disabled_labels(&format!("gui/{uid}")).into_iter().chain(disabled_labels("system")).collect();
-    let running = running_labels();
+    let (loaded, running) = launchd_state();
 
     let mut seen = HashSet::new();
-    let mut items: Vec<LaunchItem> = recs
-        .iter()
-        .filter_map(|r| {
-            let ty = r.get("Type")?;
-            let kind = if ty.starts_with("login item") {
-                ItemKind::LoginItem
-            } else if ty.contains("daemon") {
-                ItemKind::Daemon
-            } else if ty.contains("agent") {
-                ItemKind::Agent
-            } else {
-                return None;
-            };
-            let identifier = r.get("Identifier")?;
-            // The UI keys rows by label, so one label means one row.
-            if !seen.insert(label_of(identifier).to_owned()) {
-                return None;
-            }
-            let legacy = ty.starts_with("legacy");
-            let parent = r.get("Parent Identifier").and_then(|p| apps.get(p));
-            let resolve = |rel: &str| -> String {
-                let p = decode_url(rel);
-                match parent {
-                    Some((_, app)) if !p.starts_with('/') => format!("{app}/{p}"),
-                    _ => p,
-                }
-            };
-            let label = label_of(identifier).to_owned();
-            let plist = legacy.then(|| r.get("URL").map(resolve)).flatten();
-            let executable = r.get("Executable Path").map(resolve);
-            let disposition = r.get("Disposition").unwrap_or("");
-            let btm_enabled = disposition.contains("[enabled") || disposition.contains(" enabled");
-            let broken = plist.as_deref().is_some_and(|p| !Path::new(p).exists())
-                || executable.as_deref().is_some_and(|e| e.starts_with('/') && !Path::new(e).exists());
-            let app_path = parent.map(|(_, a)| a.clone()).or_else(|| {
-                let e = executable.as_deref()?;
-                let end = e.find(".app/")? + 4;
-                Some(e[..end].to_owned())
-            });
-            Some(LaunchItem {
-                id: label.clone(),
-                name: r.get("Name").map(str::to_owned).unwrap_or_else(|| label.clone()),
-                developer: r.get("Developer Name").map(str::to_owned),
-                kind,
-                controllable: legacy && plist.is_some(),
-                enabled: btm_enabled && !disabled.contains(&label),
-                running: running.contains(&label),
-                app_name: parent.map(|(n, _)| (*n).to_owned()).filter(|n| !n.is_empty()),
-                app_path,
-                plist,
-                executable,
-                broken,
-            })
-        })
+    let mut items: Vec<LaunchItem> = from_plists(&disabled, &running)
+        .into_iter()
+        .chain(from_bundles(&loaded, &running))
+        .filter(|i| seen.insert(i.id.clone()))
         .collect();
 
     for (name, path) in if open_at_login_apps { open_at_login() } else { vec![] } {
@@ -259,6 +297,98 @@ pub fn list(open_at_login_apps: bool) -> Vec<LaunchItem> {
 
     items.sort_by_key(|i| (i.kind as u8, !i.enabled, i.name.to_lowercase()));
     items
+}
+
+/// Login items and services apps register from inside their bundle (SMAppService).
+/// Only the ones launchd has loaded are switched on; the rest are just shipped.
+fn from_bundles(loaded: &HashSet<String>, running: &HashSet<String>) -> Vec<LaunchItem> {
+    let mut out = Vec::new();
+    for app in crate::apps::installed().into_iter().filter(|a| !a.path.starts_with("/System")) {
+        let lib = app.path.join("Contents/Library");
+        let base = |kind, name: String, id: String, executable: Option<String>, plist: Option<String>| LaunchItem {
+            running: running.contains(&id),
+            id,
+            name,
+            developer: None,
+            kind,
+            controllable: false,
+            enabled: true,
+            plist,
+            executable,
+            app_path: Some(app.path.to_string_lossy().into_owned()),
+            app_name: Some(app.name.clone()),
+            broken: false,
+        };
+        for helper in std::fs::read_dir(lib.join("LoginItems")).into_iter().flatten().flatten().map(|e| e.path()) {
+            if let Some(h) = crate::apps::read_bundle(&helper).filter(|h| loaded.contains(&h.bundle_id)) {
+                out.push(base(ItemKind::LoginItem, h.name, h.bundle_id, Some(helper.to_string_lossy().into_owned()), None));
+            }
+        }
+        for (dir, kind) in [("LaunchAgents", ItemKind::Agent), ("LaunchDaemons", ItemKind::Daemon)] {
+            for plist in std::fs::read_dir(lib.join(dir)).into_iter().flatten().flatten().map(|e| e.path()) {
+                let Some(d) = plist::Value::from_file(&plist).ok().and_then(|v| v.into_dictionary()) else { continue };
+                let Some(label) = d.get("Label").and_then(|v| v.as_string()).filter(|l| loaded.contains(*l)) else { continue };
+                // BundleProgram is relative to the app.
+                let exe = d
+                    .get("BundleProgram")
+                    .and_then(|v| v.as_string())
+                    .map(|p| app.path.join(p).to_string_lossy().into_owned())
+                    .or_else(|| d.get("Program").and_then(|v| v.as_string()).map(str::to_owned));
+                let name = exe.as_deref().and_then(|e| Path::new(e).file_name()).map_or(label.to_owned(), |n| n.to_string_lossy().into_owned());
+                out.push(base(kind, name, label.to_owned(), exe, Some(plist.to_string_lossy().into_owned())));
+            }
+        }
+    }
+    out
+}
+
+/// Third-party launchd jobs from their plist folders.
+pub fn from_plists(disabled: &HashSet<String>, running: &HashSet<String>) -> Vec<LaunchItem> {
+    let home = crate::fsutil::home_dir();
+    let dirs = [
+        (home.join("Library/LaunchAgents"), ItemKind::Agent),
+        (PathBuf::from("/Library/LaunchAgents"), ItemKind::Agent),
+        (PathBuf::from("/Library/LaunchDaemons"), ItemKind::Daemon),
+    ];
+    let mut out = Vec::new();
+    for (dir, kind) in dirs {
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = e.path();
+            if path.extension().is_none_or(|x| x != "plist") {
+                continue;
+            }
+            let dict = plist::Value::from_file(&path).ok().and_then(|v| v.into_dictionary());
+            let get = |k: &str| dict.as_ref()?.get(k)?.as_string().map(str::to_owned);
+            let label = get("Label").unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().into_owned());
+            let executable = get("Program").or_else(|| {
+                dict.as_ref()?.get("ProgramArguments")?.as_array()?.first()?.as_string().map(str::to_owned)
+            });
+            let plist_disabled = dict.as_ref().and_then(|d| d.get("Disabled")).and_then(|v| v.as_boolean()).unwrap_or(false);
+            let broken = executable.as_deref().is_some_and(|e| e.starts_with('/') && !Path::new(e).exists());
+            let app_path = executable.as_deref().and_then(|e| e.find(".app/").map(|i| e[..i + 4].to_owned()));
+            let name = executable
+                .as_deref()
+                .and_then(|e| Path::new(e).file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| label.clone());
+            out.push(LaunchItem {
+                enabled: !plist_disabled && !disabled.contains(&label),
+                running: running.contains(&label),
+                id: label,
+                name,
+                developer: None,
+                kind,
+                controllable: true,
+                plist: Some(path.to_string_lossy().into_owned()),
+                executable,
+                app_name: app_path.as_deref().and_then(|a| crate::apps::read_bundle(Path::new(a))).map(|a| a.name),
+                app_path,
+                broken,
+            });
+        }
+    }
+    out
 }
 
 fn domain_of(item: &LaunchItem) -> String {
@@ -338,25 +468,26 @@ mod tests {
 
  #1:
                  UUID: D354E8EC
-                 Name: Postgres
+                 Name: Movavi Screen Recorder
                  Type: app (0x2)
-          Disposition: [enabled, allowed, notified] (0xb)
-           Identifier: 2.com.postgresapp.Postgres2
-                  URL: file:///Applications/Postgres.app/
+          Disposition: [disabled, allowed, notified] (0xa)
+           Identifier: 2.com.movavi.screenrecorder
+                  URL: file:///Applications/Movavi%20Screen%20Recorder.app/
 
  #2:
-                 Name: PostgresLoginHelper
-       Developer Name: Jakob Egger
+                 Name: Movavi Helper
+       Developer Name: Movavi Software
                  Type: login item (0x4)
-          Disposition: [enabled, allowed, notified] (0xb)
-           Identifier: 4.com.postgresapp.Postgres2LoginHelper
-                  URL: Contents/Library/LoginItems/PostgresLoginHelper.app
-    Parent Identifier: 2.com.postgresapp.Postgres2
+          Disposition: [disabled, allowed, notified] (0xa)
+           Identifier: 4.com.movavi.helper
+                  URL: Contents/Library/LoginItems/Helper.app
+    Parent Identifier: 2.com.movavi.screenrecorder
 
  #3:
                  Name: kafka-server-start
+       Developer Name: (null)
                  Type: legacy agent (0x10008)
-          Disposition: [disabled, allowed, notified] (0xa)
+          Disposition: [enabled, allowed, notified] (0xb)
            Identifier: 8.homebrew.mxcl.kafka
                   URL: file:///Users/me/Library/LaunchAgents/homebrew.mxcl.kafka.plist
       Executable Path: /usr/local/opt/kafka/bin/kafka-server-start
@@ -365,13 +496,47 @@ mod tests {
 "#;
 
     #[test]
-    fn parses_btm_records() {
-        let recs = parse(DUMP, &[501]);
-        assert_eq!(recs.len(), 3);
-        assert_eq!(recs[1].get("Parent Identifier"), Some("2.com.postgresapp.Postgres2"));
-        assert_eq!(recs[2].get("Disposition"), Some("[disabled, allowed, notified] (0xa)"));
-        assert!(parse(DUMP, &[0]).is_empty());
-        assert_eq!(label_of("8.homebrew.mxcl.kafka"), "homebrew.mxcl.kafka");
-        assert_eq!(decode_url("file:///Applications/Blackmagic%20RAW/Player.app/"), "/Applications/Blackmagic RAW/Player.app");
+    fn parses_btm_and_merges_into_the_scan_list() {
+        let btm = from_btm(DUMP, &HashSet::new());
+        assert_eq!(btm.len(), 2);
+        let helper = btm.iter().find(|i| i.id == "com.movavi.helper").unwrap();
+        assert_eq!(helper.kind, ItemKind::LoginItem);
+        assert!(!helper.enabled);
+        assert_eq!(helper.developer.as_deref(), Some("Movavi Software"));
+        assert_eq!(helper.app_path.as_deref(), Some("/Applications/Movavi Screen Recorder.app"));
+        assert_eq!(helper.executable, None);
+
+        // The scan already had kafka (from its plist) but not the switched-off helper.
+        let scanned = vec![LaunchItem {
+            id: "homebrew.mxcl.kafka".into(),
+            name: "kafka-server-start".into(),
+            developer: None,
+            kind: ItemKind::Agent,
+            controllable: true,
+            enabled: false,
+            running: false,
+            plist: Some("/Users/me/Library/LaunchAgents/homebrew.mxcl.kafka.plist".into()),
+            executable: None,
+            app_path: None,
+            app_name: None,
+            broken: false,
+        }];
+        let merged = merge(scanned, btm);
+        assert_eq!(merged.len(), 2, "kafka merged, helper added");
+        let kafka = merged.iter().find(|i| i.id == "homebrew.mxcl.kafka").unwrap();
+        assert!(!kafka.enabled, "launchd's disabled state wins for plist items");
+    }
+
+    #[test]
+    fn lists_items_without_asking_for_a_password() {
+        // Must return quickly and without sfltool (which prompts for a password).
+        let t = std::time::Instant::now();
+        let items = list(false);
+        assert!(t.elapsed().as_secs() < 15, "took {:?}", t.elapsed());
+        let mut ids: Vec<_> = items.iter().map(|i| &i.id).collect();
+        let n = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "ids are unique");
     }
 }

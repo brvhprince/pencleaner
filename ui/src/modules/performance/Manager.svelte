@@ -97,7 +97,18 @@
           </div>
         {:else if perf.section === "login" || perf.section === "background"}
           <div class="controls">
-            <button onclick={() => api.perf.openLoginItemsSettings()}>Open Login Items in System Settings <ExternalLink size={11} /></button>
+            {#if perf.fullListAt}
+              <span class="full"><Lock size={11} /> Full list from System Settings, loaded {new Date(perf.fullListAt).toLocaleTimeString([], { timeStyle: "short" })}</span>
+            {:else}
+              <button
+                onclick={() => perf.loadFullList()}
+                disabled={perf.loadingFull}
+                title="Adds developer names and items you've switched off in System Settings. macOS needs your password for this."
+              >
+                <Lock size={11} /> {perf.loadingFull ? "Waiting for your password…" : "Full List (asks for password)"}
+              </button>
+            {/if}
+            <button class="push" onclick={() => api.perf.openLoginItemsSettings()}>Open Login Items in System Settings <ExternalLink size={11} /></button>
           </div>
         {:else if perf.section === "snapshots"}
           <div class="controls">
@@ -296,6 +307,16 @@
     font-weight: 500;
     text-transform: none;
     letter-spacing: 0;
+  }
+  .full {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 500;
+    color: var(--m-muted);
+  }
+  .push {
+    margin-left: auto;
   }
   footer .count {
     display: inline-flex;

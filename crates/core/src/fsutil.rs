@@ -67,6 +67,37 @@ pub fn physical_offset(path: &Path) -> Option<u64> {
     (r != -1 && off > 0).then_some(off as u64)
 }
 
+/// Runs a command with a deadline; a hung system tool (sfltool sometimes is) is killed
+/// instead of freezing a scan. Returns stdout, or None on timeout, failure to start, or
+/// a non-zero exit.
+pub fn run_with_timeout(cmd: &str, args: &[&str], limit: std::time::Duration) -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(cmd).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
+    // Drain on another thread so a chatty child can't block on a full pipe.
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        buf
+    });
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let out = reader.join().ok()?;
+                return status.success().then(|| String::from_utf8_lossy(&out).into_owned());
+            }
+            Ok(None) if started.elapsed() < limit => std::thread::sleep(std::time::Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
 pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -133,6 +164,14 @@ mod tests {
         assert!(pa.is_some());
         assert_eq!(pa, pb, "a clone shares its blocks");
         assert_ne!(pa, pc, "a byte copy has its own blocks");
+    }
+
+    #[test]
+    fn kills_commands_that_overrun() {
+        let t = std::time::Instant::now();
+        assert_eq!(run_with_timeout("/bin/sleep", &["5"], std::time::Duration::from_millis(300)), None);
+        assert!(t.elapsed().as_secs() < 2);
+        assert_eq!(run_with_timeout("/bin/echo", &["hi"], std::time::Duration::from_secs(5)).as_deref(), Some("hi\n"));
     }
 
     #[test]

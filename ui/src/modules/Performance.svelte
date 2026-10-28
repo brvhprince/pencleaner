@@ -20,6 +20,7 @@
       await perf.scan();
       if (q.has("review")) perf.review((q.get("review") || "tasks") as Section);
       if (q.has("run")) perf.runTasks();
+      if (q.has("full")) await perf.loadFullList();
     })();
   });
 </script>

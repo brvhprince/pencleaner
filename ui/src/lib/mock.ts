@@ -1,6 +1,10 @@
 // Fake backend for running the UI in a plain browser (`pnpm dev`, then open
 // http://localhost:1420). Lets the UI be designed and screenshotted without Tauri.
 import type {
+  Grant,
+  PrivacyItem,
+  ProtectionReport,
+  WatchAlert,
   ActivityEvent,
   AppUpdate,
   UpdateEvent,
@@ -282,6 +286,129 @@ let updates: AppUpdate[] = [
   upd("pgAdmin 4", "catalog", "9.2", "9.18", { actionNote: "Opens the developer's website to download it" }),
 ];
 
+const threat = location.hash.includes("threat");
+const priv = (owner: string, trace: PrivacyItem["trace"], title: string, detail: string, mb: number, extra: Partial<PrivacyItem> = {}): PrivacyItem => ({
+  id: `${owner}:${title}`.toLowerCase().replace(/\s+/g, "-"),
+  owner,
+  appPath: owner === "macOS" ? null : `/Applications/${owner}.app`,
+  trace,
+  title,
+  detail,
+  size: mb * MB,
+  recommended: trace === "history" || trace === "recentItems",
+  warning: null,
+  running: false,
+  ...extra,
+});
+const grant = (label: string, appName: string, extra: Partial<Grant> = {}): Grant => ({
+  id: `${label}|${appName}`,
+  service: label.replace(/\s+/g, ""),
+  label,
+  settingsAnchor: "Privacy_Camera",
+  client: `com.example.${appName.toLowerCase().replace(/\s+/g, "")}`,
+  appName,
+  appPath: `/Applications/${appName}.app`,
+  target: null,
+  granted: days(200),
+  orphaned: false,
+  revocable: !extra.orphaned,
+  lockedToSigner: true,
+  system: false,
+  ...extra,
+});
+let watcherOn = location.hash.includes("watching");
+let watchAlerts: WatchAlert[] = watcherOn
+  ? [{ at: days(1), id: "com.updater.helper", name: "updater", plist: `${HOME}/Library/LaunchAgents/com.updater.helper.plist`, program: `${HOME}/Library/.cache/updater`, severity: "high", reasons: ["Runs from a hidden folder", "Its program isn't signed by any developer"], malware: null }]
+  : [];
+let protectionReport: ProtectionReport | null = null;
+
+function buildProtection(): ProtectionReport {
+  return {
+    rules: { version: "5368", rules: 589 },
+    filesScanned: 1208,
+    detections: threat ? [{ file: "/Applications/Search Lite.app/Contents/MacOS/Search Lite", target: "/Applications/Search Lite.app", rule: "MACOS.ADLOAD.D", description: null }] : [],
+    suspicious: threat
+      ? [
+          {
+            item: { id: "com.apple.update.helper", name: "update", developer: null, kind: "agent", controllable: true, enabled: true, running: true, plist: `${HOME}/Library/LaunchAgents/com.apple.update.helper.plist`, executable: "/bin/sh", appPath: null, appName: null, broken: false },
+            program: `${HOME}/Library/.hidden/update.sh`,
+            signer: { kind: "script" },
+            severity: "high",
+            reasons: ["Uses an Apple name but isn't signed by Apple", "Runs from a hidden folder"],
+          },
+        ]
+      : [],
+    privacy: [
+      priv("Safari", "history", "Browsing history", "Visited sites, recently closed tabs and the downloads list", 18, { warning: "With iCloud Safari sync on, history from your other devices may come back." }),
+      priv("Safari", "cookies", "Cookies & website data", "Signs you out of websites", 142, { warning: "You'll be signed out of every website in Safari." }),
+      priv("Google Chrome", "history", "Browsing history", "History, top sites and the downloads list · 14 profiles", 386, { running: true }),
+      priv("Google Chrome", "cookies", "Cookies & website data", "Signs you out of websites · 14 profiles", 1240, { running: true, warning: "You'll be signed out of every website in this browser." }),
+      priv("Google Chrome", "autofill", "Autofill data", "Form entries · 14 profiles", 21, { running: true, warning: "Also removes saved addresses, payment cards and custom search engines. Saved passwords are never touched." }),
+      priv("Brave", "cookies", "Cookies & website data", "Signs you out of websites · 1 profile", 64),
+      priv("macOS", "recentItems", "Recent items", "The Recent Items menu and every app's Open Recent list", 0.3),
+    ],
+    permissions: [
+      grant("Camera", "zoom.us"),
+      grant("Camera", "Google Chrome"),
+      grant("Microphone", "Adobe Audition"),
+      grant("Microphone", "Skype", { orphaned: true, appPath: null }),
+      grant("Screen Recording", "RustDesk", { system: true }),
+      grant("Screen Recording", "Loom", { orphaned: true, appPath: null, system: true }),
+      grant("Accessibility", "Task Manager TMOG", { system: true }),
+      grant("Full Disk Access", "Terminal", { system: true, appPath: "/System/Applications/Utilities/Terminal.app" }),
+      grant("Full Disk Access", "node", { system: true, revocable: false, client: "/usr/local/bin/node", appPath: null }),
+      grant("Automation", "PenCleaner", { target: "System Events" }),
+    ],
+    permissionsError: null,
+    watcher: watcherOn,
+    alerts: watchAlerts,
+    errors: [],
+    elapsedMs: 14000,
+    cancelled: false,
+  };
+}
+
+const protection = {
+  async scan(onProgress: (p: Progress) => void): Promise<ProtectionReport> {
+    for (let i = 1; i <= 12; i++) {
+      onProgress({ items: i * 100, bytes: i * 200 * MB, current: `/Applications/App ${i}.app/Contents/MacOS/App ${i}` });
+      await wait(location.hash.includes("slowscan") ? 600 : 110);
+    }
+    protectionReport = buildProtection();
+    return protectionReport;
+  },
+  cancel: async () => {},
+  remove: async (kind: "detection" | "suspicious", id: string) => {
+    await wait(400);
+    if (!protectionReport) return;
+    if (kind === "detection") protectionReport.detections = protectionReport.detections.filter((d) => d.target !== id);
+    else protectionReport.suspicious = protectionReport.suspicious.filter((f) => f.item.id !== id);
+  },
+  cleanPrivacy: async (ids: string[]) => {
+    await wait(500);
+    const items = protectionReport?.privacy ?? [];
+    const cleaned = items.filter((i) => ids.includes(i.id) && !i.running).map((i) => i.id);
+    const failed = items.filter((i) => ids.includes(i.id) && i.running).map((i) => [i.id, `Quit ${i.owner} first.`] as [string, string]);
+    const bytes = items.filter((i) => cleaned.includes(i.id)).reduce((s, i) => s + i.size, 0);
+    if (protectionReport) protectionReport.privacy = items.filter((i) => !cleaned.includes(i.id));
+    return { cleaned, failed, bytes };
+  },
+  revoke: async (id: string) => {
+    await wait(400);
+    if (protectionReport) protectionReport.permissions = protectionReport.permissions.filter((g) => g.id !== id);
+    return protectionReport?.permissions ?? [];
+  },
+  openSettings: async () => {},
+  setWatcher: async (enabled: boolean) => {
+    await wait(300);
+    watcherOn = enabled;
+    return { enabled, alerts: watchAlerts };
+  },
+  clearAlerts: async () => {
+    watchAlerts = [];
+  },
+};
+
 const perf = {
   scan: async () => {
     await wait(900);
@@ -300,6 +427,16 @@ const perf = {
       out.push({ id, ok: id !== "speed-up-mail", message: id === "free-ram" ? "Freed 1.4 GB." : id === "speed-up-mail" ? "Quit Mail first." : "Done." });
     }
     return out;
+  },
+  fullItems: async () => {
+    await wait(1200);
+    if (!perfItems.some((i) => i.id === "com.movavi.helper")) {
+      perfItems = [
+        ...perfItems.map((i) => (i.kind === "agent" && !i.developer ? { ...i, developer: i.name.includes("kafka") || i.name.includes("rabbit") ? null : "Homebrew" } : i)),
+        item("Movavi Screen Recorder Helper", "loginItem", { id: "com.movavi.helper", enabled: false, controllable: false, plist: null, developer: "Movavi Software", appName: "Movavi Screen Recorder" }),
+      ];
+    }
+    return perfItems;
   },
   setItem: async (id: string, enabled: boolean) => {
     await wait(300);
@@ -458,6 +595,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const mock = {
   perf,
+  protection,
   activity: {
     list: async () => activity,
     clear: async () => {

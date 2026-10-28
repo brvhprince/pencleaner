@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
   import { inTauri } from "./lib/api";
+  import About from "./lib/components/About.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import Toasts from "./lib/components/Toasts.svelte";
@@ -9,6 +11,7 @@
   import Applications from "./modules/Applications.svelte";
   import Cleanup from "./modules/Cleanup.svelte";
   import Performance from "./modules/Performance.svelte";
+  import Protection from "./modules/Protection.svelte";
   import Clutter from "./modules/Clutter.svelte";
   import Activity from "./modules/Activity.svelte";
   import SmartCare from "./modules/SmartCare.svelte";
@@ -16,6 +19,16 @@
   import Tools from "./modules/Tools.svelte";
 
   const current = $derived(MODULE[app.module]);
+  let showAbout = $state(!inTauri && location.hash.includes("about"));
+
+  // PenCleaner → About PenCleaner in the menu bar.
+  $effect(() => {
+    if (!inTauri) return;
+    const off = listen("open-about", () => (showAbout = true));
+    return () => {
+      off.then((f) => f());
+    };
+  });
 
   onMount(() => {
     // Browser preview only: #module=tools etc. jumps straight to a module.
@@ -53,6 +66,8 @@
           <Applications />
         {:else if app.module === "performance"}
           <Performance />
+        {:else if app.module === "protection"}
+          <Protection />
         {:else if app.module === "tools"}
           <Tools />
         {:else if app.module === "smartcare"}
@@ -73,6 +88,7 @@
   </main>
 
   <Onboarding />
+  {#if showAbout}<About onclose={() => (showAbout = false)} />{/if}
   <Toasts />
 </div>
 

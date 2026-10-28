@@ -18,6 +18,10 @@
     Sparkles,
     Trash,
     Wrench,
+    Bug,
+    EyeOff,
+    KeyRound,
+    RefreshCw,
   } from "@lucide/svelte";
   import type { Component } from "svelte";
   import { MODULE, type ModuleId } from "../lib/modules";
@@ -37,6 +41,10 @@
     { title: "AI Clutter", text: "Local models and caches from Ollama, LM Studio and Hugging Face.", icon: Bot, module: "cleanup" },
     { title: "Mail Attachments", text: "Copies of attachments Mail saved locally.", icon: Mail, module: "cleanup" },
     { title: "Trash Bins", text: "Empty the Trash on every connected drive at once.", icon: Trash, module: "cleanup" },
+    { title: "Malware Scan", text: "Checks apps and background items against Apple's own XProtect signatures, offline.", icon: Bug, module: "protection" },
+    { title: "Privacy", text: "Clear browsing history, cookies and recent-items lists. Never passwords or bookmarks.", icon: EyeOff, module: "protection" },
+    { title: "App Permissions", text: "See which apps can use your camera, mic and screen, and revoke the ones you don't want.", icon: KeyRound, module: "protection" },
+    { title: "App Updater", text: "Newer versions from the App Store, developer feeds and Homebrew, verified before installing.", icon: RefreshCw, module: "applications" },
     { title: "Large & Old Files", text: "Big files you haven't opened in a long time.", icon: FileClock, module: "clutter" },
     { title: "Duplicate Finder", text: "Identical files stored in more than one place.", icon: Copy, module: "clutter" },
     { title: "Similar Images", text: "Near-identical photos and screenshots. Keep the best one.", icon: Images, module: "clutter" },
@@ -88,15 +96,16 @@
 </section>
 
 <style>
+  /* The header stays put; only the grid scrolls, so cards never slide under it. */
   .tools {
     height: 100%;
-    overflow-y: auto;
-    padding: 0 28px 28px;
+    display: flex;
+    flex-direction: column;
+    padding: 0 0 0 28px;
   }
   header {
-    position: sticky;
-    top: 0;
-    z-index: 2;
+    flex: none;
+    padding-right: 28px !important;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
@@ -130,6 +139,13 @@
     font: inherit;
   }
   .grid {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    align-content: start;
+    padding: 6px 28px 28px 0;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 14px;
