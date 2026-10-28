@@ -227,10 +227,11 @@ mod tests {
     fn reads_signers() {
         assert_eq!(signer(Path::new("/usr/bin/curl"), true), Signer::Apple);
         assert_eq!(signer(Path::new("/System/Applications/Calculator.app"), true), Signer::Apple);
-        if Path::new("/Applications/Xcode.app").exists() {
-            // App Store copies are signed for distribution; the developer download (as on
-            // CI machines) by Apple itself. Either way it must come out trusted.
-            assert!(matches!(signer(Path::new("/Applications/Xcode.app"), true), Signer::Apple | Signer::Developer { notarized: Some(true), .. }));
+        // A real Xcode install must come out trusted. CI machines carry repackaged copies
+        // (GitHub's fails this), so it's only checked on a developer's Mac.
+        if Path::new("/Applications/Xcode.app").exists() && std::env::var_os("CI").is_none() {
+            let got = signer(Path::new("/Applications/Xcode.app"), true);
+            assert!(matches!(got, Signer::Apple | Signer::Developer { notarized: Some(true), .. }), "Xcode came out as {got:?}");
         }
         let dir = tempfile::tempdir().unwrap();
         let s = dir.path().join("x.sh");
