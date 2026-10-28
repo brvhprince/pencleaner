@@ -159,7 +159,9 @@ export interface RelatedFile {
 }
 
 export interface AppEntry {
+  /** The bundle path: unique even when two copies share a bundle id. */
   id: string;
+  bundleId: string;
   name: string;
   version: string | null;
   path: string;
@@ -169,6 +171,7 @@ export interface AppEntry {
   lastUsed: number | null;
   appStore: boolean;
   running: boolean;
+  sharesSupportFiles: boolean;
 }
 
 export interface Leftover {
@@ -197,6 +200,73 @@ export interface AppsReport {
 }
 
 export type AppTarget = { kind: "app" | "leftover" | "installer"; id: string };
+
+export interface MemoryStats {
+  total: number;
+  used: number;
+  app: number;
+  wired: number;
+  compressed: number;
+  cached: number;
+  free: number;
+  swapUsed: number;
+  swapTotal: number;
+  pressure: "normal" | "warning" | "critical";
+}
+
+export interface ProcessMemory {
+  name: string;
+  appPath: string | null;
+  bytes: number;
+  processes: number;
+}
+
+export type LaunchKind = "loginItem" | "agent" | "daemon";
+
+export interface LaunchItem {
+  id: string;
+  name: string;
+  developer: string | null;
+  kind: LaunchKind;
+  controllable: boolean;
+  enabled: boolean;
+  running: boolean;
+  plist: string | null;
+  executable: string | null;
+  appPath: string | null;
+  appName: string | null;
+  broken: boolean;
+}
+
+export interface Snapshot {
+  id: string;
+  created: number | null;
+}
+
+export interface PerfTask {
+  id: string;
+  title: string;
+  description: string;
+  admin: boolean;
+  slow: boolean;
+  recommended: boolean;
+  reason: string | null;
+}
+
+export interface PerfReport {
+  memory: MemoryStats;
+  processes: ProcessMemory[];
+  items: LaunchItem[];
+  snapshots: Snapshot[];
+  purgeable: number | null;
+  tasks: PerfTask[];
+}
+
+export interface TaskResult {
+  id: string;
+  ok: boolean;
+  message: string;
+}
 
 /** URL for showing a local image in the webview. */
 export function fileSrc(path: string) {
@@ -262,6 +332,20 @@ const tauriApi = {
     icon: (path: string) => invoke<string | null>("app_icon", { path }),
   },
 
+  perf: {
+    scan: () => invoke<PerfReport>("perf_scan"),
+    memory: () => invoke<{ memory: MemoryStats; processes: ProcessMemory[] }>("perf_memory"),
+    runTasks(ids: string[], onStart: (id: string) => void) {
+      const ch = new Channel<string>();
+      ch.onmessage = onStart;
+      return invoke<TaskResult[]>("perf_run_tasks", { ids, onStart: ch });
+    },
+    setItem: (id: string, enabled: boolean) => invoke<LaunchItem[]>("perf_set_item", { id, enabled }),
+    removeItem: (id: string) => invoke<LaunchItem[]>("perf_remove_item", { id }),
+    deleteSnapshots: (ids: string[]) => invoke<{ snapshots: Snapshot[]; purgeable: number | null }>("perf_delete_snapshots", { ids }),
+    openLoginItemsSettings: () => invoke<void>("open_login_items_settings"),
+  },
+
   remove(items: { path: string; size?: number }[], mode: RemoveMode, onEvent: (e: RemoveEvent) => void) {
     const ch = new Channel<RemoveEvent>();
     ch.onmessage = onEvent;
@@ -295,6 +379,7 @@ const mockApi: typeof tauriApi = {
     remove: mock.appsRemove,
     icon: async () => null,
   },
+  perf: mock.perf,
   remove: (items, _mode, onEvent) => mock.remove(items, onEvent),
 };
 

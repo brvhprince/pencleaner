@@ -43,7 +43,7 @@ pub fn installed() -> Vec<AppInfo> {
         PathBuf::from("/System/Applications/Utilities"),
         PathBuf::from("/Applications/Utilities"),
     ];
-    let mut out = Vec::new();
+    let mut out: Vec<AppInfo> = Vec::new();
     for root in roots {
         let Ok(rd) = fs::read_dir(&root) else { continue };
         for e in rd.flatten() {
@@ -62,6 +62,9 @@ pub fn installed() -> Vec<AppInfo> {
             }
         }
     }
+    // /Applications/Utilities is both a root and a subfolder of /Applications.
+    let mut seen = HashSet::new();
+    out.retain(|a| seen.insert(a.path.clone()));
     out
 }
 
@@ -129,6 +132,11 @@ mod tests {
     #[test]
     fn finds_system_apps_and_running_finder() {
         let apps = super::installed();
+        let mut paths: Vec<_> = apps.iter().map(|a| &a.path).collect();
+        let n = paths.len();
+        paths.sort();
+        paths.dedup();
+        assert_eq!(paths.len(), n, "each app listed once");
         assert!(apps.iter().any(|a| a.bundle_id == "com.apple.calculator"));
         assert!(super::running_bundle_ids().contains("com.apple.finder"));
     }

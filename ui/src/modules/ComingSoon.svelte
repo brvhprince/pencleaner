@@ -8,4 +8,4 @@
 </script>
 
 <ModuleHome {module} />
-<ScanButton label="Scan" onclick={() => app.toast(`${module.title} arrives in ${module.comingIn}. Space Lens, Cleanup and My Clutter work today.`)} />
+<ScanButton label="Scan" onclick={() => app.toast(`${module.title} arrives in ${module.comingIn}. everything else works today.`)} />

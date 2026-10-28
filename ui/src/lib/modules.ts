@@ -113,7 +113,6 @@ export const MODULES: ModuleDef[] = [
       { icon: Clock, label: "Time Machine Snapshots" },
     ],
     theme: theme("#3f1205", "#86330f", "#c4561d", "#e47a35", "#ff9a4d", "#ffbb85"),
-    comingIn: "Phase 6",
   },
   {
     id: "applications",
@@ -127,7 +126,6 @@ export const MODULES: ModuleDef[] = [
       { icon: Download, label: "Installation Files" },
     ],
     theme: theme("#0b1856", "#1c2d96", "#3d2aa6", "#3d6fe2", "#6d9bff", "#a3c0ff"),
-    comingIn: "Phase 5",
   },
   {
     id: "clutter",

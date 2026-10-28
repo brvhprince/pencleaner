@@ -17,7 +17,7 @@ fn main() {
         println!("  {:>9} + {:>9}  {:<28} used {:<6} {} files{}{}", mb(a.size), mb(a.related_size), a.name.chars().take(28).collect::<String>(), days(a.last_used), a.related.len(),
             if admin > 0 { format!(", {admin} need admin") } else { String::new() }, if a.running { " [running]" } else { "" });
     }
-    let zoom = r.apps.iter().find(|a| a.id == "us.zoom.xos");
+    let zoom = r.apps.iter().find(|a| a.bundle_id == "us.zoom.xos");
     if let Some(z) = zoom { println!("\n  zoom.us files:"); for f in &z.related { println!("    {:<20} {:>9} {}{}", f.label, mb(f.size), f.path, if f.admin { " [admin]" } else { "" }); } }
     println!("\n== Leftovers, total {}", mb(r.leftovers.iter().map(|l| l.size).sum()));
     for l in r.leftovers.iter().take(25) {

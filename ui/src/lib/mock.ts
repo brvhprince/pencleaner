@@ -1,6 +1,9 @@
 // Fake backend for running the UI in a plain browser (`pnpm dev`, then open
 // http://localhost:1420). Lets the UI be designed and screenshotted without Tauri.
 import type {
+  LaunchItem,
+  PerfReport,
+  TaskResult,
   AppEntry,
   AppTarget,
   AppsReport,
@@ -154,10 +157,12 @@ const rel = (label: string, path: string, mb: number, admin = false) => ({ label
 
 function app(name: string, id: string, appMb: number, usedDays: number | null, related: ReturnType<typeof rel>[], extra: Partial<AppEntry> = {}): AppEntry {
   return {
-    id,
+    id: `/Applications/${name}.app`,
+    bundleId: id,
     name,
     version: "1.0",
     path: `/Applications/${name}.app`,
+    sharesSupportFiles: false,
     size: Math.round(appMb * MB),
     related,
     relatedSize: related.reduce((s, f) => s + f.size, 0),
@@ -169,6 +174,100 @@ function app(name: string, id: string, appMb: number, usedDays: number | null, r
 }
 
 let appsReport: AppsReport | null = null;
+
+const item = (name: string, kind: LaunchItem["kind"], extra: Partial<LaunchItem> = {}): LaunchItem => ({
+  id: name.toLowerCase().replace(/\s+/g, "."),
+  name,
+  developer: null,
+  kind,
+  controllable: true,
+  enabled: true,
+  running: false,
+  plist: `${HOME}/Library/LaunchAgents/${name}.plist`,
+  executable: null,
+  appPath: null,
+  appName: null,
+  broken: false,
+  ...extra,
+});
+
+let perfItems: LaunchItem[] = [
+  item("CleanMyMac Menu", "loginItem", { controllable: false, running: true, appName: "CleanMyMac", developer: "MacPaw Way Ltd", plist: null }),
+  item("PostgresLoginHelper", "loginItem", { controllable: false, appName: "Postgres", developer: "Jakob Egger", plist: null }),
+  item("TMOG Hotkey", "loginItem", { controllable: false, running: true, appName: "Task Manager TMOG", plist: null }),
+  item("kafka-server-start", "agent", { id: "homebrew.mxcl.kafka", running: true }),
+  item("rabbitmq-server", "agent", { id: "homebrew.mxcl.rabbitmq", running: true }),
+  item("Creative Cloud", "agent", { id: "com.adobe.AdobeCreativeCloud", running: true, developer: "Adobe Creative Cloud", plist: "/Library/LaunchAgents/com.adobe.AdobeCreativeCloud.plist" }),
+  item("Java Updater", "agent", { id: "com.oracle.java.Java-Updater", developer: "Oracle Java", plist: "/Library/LaunchAgents/com.oracle.java.Java-Updater.plist", broken: true }),
+  item("DropboxMacUpdate", "agent", { id: "com.dropbox.DropboxMacUpdate.agent", enabled: false, developer: "Dropbox" }),
+  item("cloudflared", "daemon", { id: "com.cloudflare.cloudflared", running: true, plist: "/Library/LaunchDaemons/com.cloudflare.cloudflared.plist" }),
+  item("VirtualBoxStartup.sh", "daemon", { id: "org.virtualbox.startup", plist: "/Library/LaunchDaemons/org.virtualbox.startup.plist" }),
+  item("us.zoom.ZoomDaemon", "daemon", { id: "us.zoom.ZoomDaemon", developer: "Zoom Video Communications, Inc.", plist: "/Library/LaunchDaemons/us.zoom.ZoomDaemon.plist" }),
+];
+let snapshots = Array.from({ length: 18 }, (_, i) => ({ id: `2026-10-${String(10 + (i >> 1)).padStart(2, "0")}-0${i % 2}0000`, created: days(18 - i) }));
+
+function buildPerf(): PerfReport {
+  return {
+    memory: { total: 17.2 * GB, used: 13.2 * GB, app: 7 * GB, wired: 4.3 * GB, compressed: 1.9 * GB, cached: 3.7 * GB, free: 0.3 * GB, swapUsed: 7 * GB, swapTotal: 8.6 * GB, pressure: "normal" },
+    processes: [
+      { name: "WebStorm", appPath: "/Applications/WebStorm.app", bytes: 3 * GB, processes: 7 },
+      { name: "Google Chrome", appPath: "/Applications/Google Chrome.app", bytes: 1.9 * GB, processes: 43 },
+      { name: "claude", appPath: null, bytes: 620 * MB, processes: 2 },
+      { name: "GitHub Desktop", appPath: "/Applications/GitHub Desktop.app", bytes: 276 * MB, processes: 8 },
+      { name: "mdworker_shared", appPath: null, bytes: 250 * MB, processes: 16 },
+    ],
+    items: perfItems,
+    snapshots,
+    purgeable: 59 * GB,
+    tasks: [
+      { id: "free-ram", title: "Free Up RAM", description: "Asks macOS to drop inactive memory and file caches so apps that need memory get it without swapping.", admin: true, slow: false, recommended: true, reason: "7.0 GB of memory has spilled into swap on disk." },
+      { id: "flush-dns", title: "Flush DNS Cache", description: "Clears remembered website addresses. Fixes sites that won't load after a network or DNS change.", admin: true, slow: false, recommended: true, reason: "Quick and harmless." },
+      { id: "thin-snapshots", title: "Remove Time Machine Snapshots", description: "Deletes local snapshots. Backups on your Time Machine drive are not touched.", admin: true, slow: false, recommended: true, reason: "18 local snapshots are holding about 59.0 GB." },
+      { id: "quicklook", title: "Reset Quick Look", description: "Clears cached file previews and thumbnails. Fixes previews that are stale or blank.", admin: false, slow: false, recommended: true, reason: "Quick and harmless." },
+      { id: "speed-up-mail", title: "Speed Up Mail", description: "Compacts Mail's message database. Quit Mail first.", admin: false, slow: false, recommended: false, reason: null },
+      { id: "rebuild-launch-services", title: "Rebuild Launch Services", description: "Re-registers apps. Fixes duplicate entries in Open With and documents opening in the wrong app.", admin: false, slow: true, recommended: false, reason: null },
+      { id: "reindex-spotlight", title: "Reindex Spotlight", description: "Rebuilds the search index from scratch. Fixes missing search results.", admin: true, slow: true, recommended: false, reason: null },
+      { id: "font-cache", title: "Clear Font Caches", description: "Removes your font caches. Takes effect after you log out.", admin: false, slow: false, recommended: false, reason: null },
+    ],
+  };
+}
+
+const perf = {
+  scan: async () => {
+    await wait(900);
+    return buildPerf();
+  },
+  memory: async () => {
+    const r = buildPerf();
+    r.memory.used += (Math.random() - 0.5) * 0.4 * GB;
+    return { memory: r.memory, processes: r.processes };
+  },
+  runTasks: async (ids: string[], onStart: (id: string) => void): Promise<TaskResult[]> => {
+    const out: TaskResult[] = [];
+    for (const id of ids) {
+      onStart(id);
+      await wait(500);
+      out.push({ id, ok: id !== "speed-up-mail", message: id === "free-ram" ? "Freed 1.4 GB." : id === "speed-up-mail" ? "Quit Mail first." : "Done." });
+    }
+    return out;
+  },
+  setItem: async (id: string, enabled: boolean) => {
+    await wait(300);
+    perfItems = perfItems.map((i) => (i.id === id ? { ...i, enabled, running: enabled && i.running } : i));
+    return perfItems;
+  },
+  removeItem: async (id: string) => {
+    await wait(300);
+    perfItems = perfItems.filter((i) => i.id !== id);
+    return perfItems;
+  },
+  deleteSnapshots: async (ids: string[]) => {
+    await wait(600);
+    snapshots = ids.length ? snapshots.filter((s) => !ids.includes(s.id)) : [];
+    return { snapshots, purgeable: snapshots.length ? 59 * GB * (snapshots.length / 18) : 0.4 * GB };
+  },
+  openLoginItemsSettings: async () => {},
+};
 
 function buildApps(): AppsReport {
   return {
@@ -188,6 +287,9 @@ function buildApps(): AppsReport {
       ]),
       app("DataGrip", "com.jetbrains.datagrip", 2730, null, []),
       app("Microsoft Excel", "com.microsoft.Excel", 2740, null, [rel("Container", `${HOME}/Library/Containers/com.microsoft.Excel`, 8)]),
+      // Two copies, one bundle id: the case that once broke keyed lists.
+      app("IDLE", "org.python.IDLE", 2.1, 400, [], { id: "/Applications/Python 3.11/IDLE.app", path: "/Applications/Python 3.11/IDLE.app", sharesSupportFiles: true, version: "3.11" }),
+      app("IDLE", "org.python.IDLE", 2.2, 30, [], { id: "/Applications/Python 3.13/IDLE.app", path: "/Applications/Python 3.13/IDLE.app", sharesSupportFiles: true, version: "3.13" }),
     ],
     leftovers: [
       { id: "net.metaquotes.wine", vendorInstalled: false, files: [rel("Application Support", `${HOME}/Library/Application Support/net.metaquotes.wine`, 1200)], size: 1200 * MB, lastActivity: days(561) },
@@ -305,6 +407,7 @@ function buildReport(): CleanupReport {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const mock = {
+  perf,
   async systemInfo(): Promise<SystemInfo> {
     return { fullDiskAccess: !location.hash.includes("nofda"), home: HOME, user: "wanpeninsula", devBuild: true };
   },

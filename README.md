@@ -21,12 +21,16 @@ cargo test -p pencleaner-core  # engine tests
 cargo run --release -p pencleaner-core --example scan -- ~/Sites   # Space Lens from the terminal
 cargo run --release -p pencleaner-core --example cleanup [developer] # Cleanup dry run (never deletes)
 cargo run --release -p pencleaner-core --example clutter [folder]    # My Clutter dry run (never deletes)
+cargo run --release -p pencleaner-core --example apps                # Applications dry run (never deletes)
+cargo run --release -p pencleaner-core --example perf                # Performance readout (runs no tasks)
 ```
 
 In a browser, `http://localhost:1420/#autoscan&open=/Users/wanpeninsula&select&review`
 drives Space Lens through every state against the mock backend, and
 `#module=cleanup&autoscan&review=projects` (or `&confirm`, `&clean`) does the same for Cleanup,
-and `#module=clutter&autoscan&review=similar` for My Clutter.
+`#module=clutter&autoscan&review=similar` for My Clutter, and
+`#module=applications&autoscan&review=apps&expand` (or `&confirm`) for Applications, and
+`#module=performance&autoscan&review=background` (or `tasks&run`, `memory`, `snapshots`) for Performance.
 
 **Full Disk Access:** without it macOS hides Mail, Safari, containers and more. During
 `tauri dev` the app runs inside your terminal, so grant access to the terminal (or IDE).
@@ -36,6 +40,9 @@ and `#module=clutter&autoscan&review=similar` for My Clutter.
 Every removal passes `crates/core/src/safety.rs`, which refuses system paths, home and
 standard folders, and `~/Library/*` roots, including when reached through a symlink.
 User files go to the Trash; only regenerable data (caches, build output) is deleted outright.
+Anything that needs root (root-owned apps, system launch daemons) goes through one
+standard macOS password prompt, and only for paths on a short allowlist
+(`/Applications/*.app`, `/Library/{LaunchAgents,LaunchDaemons,PrivilegedHelperTools,…}/<item>`).
 Cleanup only acts on item ids from its own last scan report, so the UI can never ask it to
 delete an arbitrary path, and anything carrying a warning needs a second confirmation.
 Scans never download iCloud placeholders and never touch access times.

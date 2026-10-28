@@ -6,7 +6,9 @@
   import Toasts from "./lib/components/Toasts.svelte";
   import { MODULE, MODULES } from "./lib/modules";
   import { app } from "./lib/state.svelte";
+  import Applications from "./modules/Applications.svelte";
   import Cleanup from "./modules/Cleanup.svelte";
+  import Performance from "./modules/Performance.svelte";
   import Clutter from "./modules/Clutter.svelte";
   import ComingSoon from "./modules/ComingSoon.svelte";
   import SpaceLens from "./modules/SpaceLens.svelte";
@@ -38,17 +40,31 @@
   <main>
     {#key app.module}
       <div class="page">
+        <!-- A render error in one module shows a recoverable card instead of freezing the app. -->
+        <svelte:boundary onerror={(e) => console.error(`[${app.module}]`, e)}>
         {#if app.module === "spacelens"}
           <SpaceLens />
         {:else if app.module === "cleanup"}
           <Cleanup />
         {:else if app.module === "clutter"}
           <Clutter />
+        {:else if app.module === "applications"}
+          <Applications />
+        {:else if app.module === "performance"}
+          <Performance />
         {:else if app.module === "tools"}
           <Tools />
         {:else}
           <ComingSoon module={current} />
         {/if}
+          {#snippet failed(error, reset)}
+            <div class="crash glass" role="alert">
+              <h2>{current.title} hit a problem</h2>
+              <p>{error instanceof Error ? error.message : String(error)}</p>
+              <button class="btn lg" onclick={reset}>Try Again</button>
+            </div>
+          {/snippet}
+        </svelte:boundary>
       </div>
     {/key}
   </main>
@@ -92,6 +108,25 @@
     position: absolute;
     inset: 0;
     animation: enter 360ms var(--ease);
+  }
+  .crash {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 440px;
+    height: fit-content;
+    padding: 24px;
+    text-align: center;
+  }
+  .crash h2 {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .crash p {
+    margin: 8px 0 16px;
+    color: var(--text-2);
+    font-size: 12px;
+    word-break: break-word;
   }
   @keyframes enter {
     from {

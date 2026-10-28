@@ -38,7 +38,10 @@ pub struct RelatedFile {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppEntry {
+    /// The bundle path: unique even when two copies share a bundle id
+    /// (e.g. IDLE.app in two Python versions).
     pub id: String,
+    pub bundle_id: String,
     pub name: String,
     pub version: Option<String>,
     pub path: String,
@@ -48,6 +51,8 @@ pub struct AppEntry {
     pub last_used: Option<i64>,
     pub app_store: bool,
     pub running: bool,
+    /// Another installed copy shares this bundle id, so its support files stay put.
+    pub shares_support_files: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -190,23 +195,31 @@ pub fn scan(ctl: &ScanControl) -> AppsReport {
     let installed: Vec<AppInfo> = apps::installed().into_iter().filter(user_app).collect();
     let universe = Universe::build(&running);
 
+    // Two copies with one bundle id (two Python versions' IDLE.app) share their support
+    // files; removing one copy must leave those for the other.
+    let mut copies: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for a in &installed {
+        *copies.entry(a.bundle_id.to_ascii_lowercase()).or_default() += 1;
+    }
     let mut claimed: HashSet<&Path> = HashSet::new();
     let mut entries: Vec<AppEntry> = installed
         .iter()
         .map(|a| {
             let mine: Vec<&LibEntry> = library.iter().filter(|e| matching::belongs_to(e, &a.bundle_id, &a.name)).collect();
             claimed.extend(mine.iter().map(|e| e.path.as_path()));
-            (a, mine)
+            let shared = copies[&a.bundle_id.to_ascii_lowercase()] > 1;
+            (a, if shared { Vec::new() } else { mine }, shared)
         })
         .collect::<Vec<_>>()
         .into_par_iter()
-        .map(|(a, mine)| {
+        .map(|(a, mine, shared)| {
             ctl.set_current(&a.path);
             let size = fsutil::disk_usage(&a.path);
             ctl.add(1, size);
             let related = related(&mine);
             AppEntry {
-                id: a.bundle_id.clone(),
+                id: a.path.to_string_lossy().into_owned(),
+                bundle_id: a.bundle_id.clone(),
                 name: a.name.clone(),
                 version: a.version.clone(),
                 path: a.path.to_string_lossy().into_owned(),
@@ -216,6 +229,7 @@ pub fn scan(ctl: &ScanControl) -> AppsReport {
                 last_used: spotlight::meta(&a.path).last_used,
                 app_store: a.path.join("Contents/_MASReceipt").exists(),
                 running: running.contains(&a.bundle_id.to_ascii_lowercase()),
+                shares_support_files: shared,
             }
         })
         .collect();
@@ -322,7 +336,7 @@ impl AppsReport {
             Target::App(id) => self.apps.iter().find(|a| &a.id == id).map(|a| {
                 let mut paths = vec![PathBuf::from(&a.path)];
                 paths.extend(a.related.iter().map(|f| PathBuf::from(&f.path)));
-                let running = a.running && apps::running_bundle_ids().contains(&a.id.to_ascii_lowercase());
+                let running = a.running && apps::running_bundle_ids().contains(&a.bundle_id.to_ascii_lowercase());
                 let error = running.then(|| format!("{} is running. Quit it, then try again.", a.name));
                 job(&a.id, &a.name, a.size + a.related_size, paths, error)
             }),

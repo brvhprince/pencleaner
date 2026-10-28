@@ -5,6 +5,7 @@ use parking_lot::{Mutex, RwLock};
 use pencleaner_core::cleanup::{self, Category, CleanEvent, CleanSummary, Report};
 use pencleaner_core::applications::{self, AppsReport, Target};
 use pencleaner_core::clutter::{self, ClutterReport};
+use pencleaner_core::performance::{self, items::LaunchItem, memory, PerfReport, TaskResult};
 use pencleaner_core::progress::{Progress, ScanControl};
 use pencleaner_core::remove::{self, RemoveEvent, RemoveItem, RemoveMode, RemoveSummary};
 use pencleaner_core::space_lens::{self, Listing, ScanSummary, ScanTree};
@@ -32,6 +33,7 @@ pub struct AppState {
     clutter_ctl: Mutex<Option<Arc<ScanControl>>>,
     apps: RwLock<Option<AppsReport>>,
     icons: Mutex<HashMap<String, Option<String>>>,
+    perf: RwLock<Option<PerfReport>>,
 }
 
 #[derive(Serialize)]
@@ -308,4 +310,99 @@ pub async fn app_icon(app: AppHandle, path: String) -> CmdResult<Option<String>>
     .map_err(|e| e.to_string())?;
     app.state::<AppState>().icons.lock().insert(key, url.clone());
     Ok(url)
+}
+
+#[tauri::command]
+pub async fn perf_scan(app: AppHandle) -> CmdResult<PerfReport> {
+    // Includes "Open at Login" apps, which asks once for permission to read them.
+    let report = tauri::async_runtime::spawn_blocking(|| performance::scan(true)).await.map_err(|e| e.to_string())?;
+    *app.state::<AppState>().perf.write() = Some(report.clone());
+    Ok(report)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemorySnapshot {
+    memory: memory::MemoryStats,
+    processes: Vec<memory::ProcessMemory>,
+}
+
+/// Cheap live numbers for the memory gauge.
+#[tauri::command]
+pub async fn perf_memory() -> CmdResult<MemorySnapshot> {
+    tauri::async_runtime::spawn_blocking(|| MemorySnapshot { memory: memory::stats(), processes: memory::top_processes(10) })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn perf_run_tasks(ids: Vec<String>, on_start: Channel<String>) -> CmdResult<Vec<TaskResult>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        performance::run_tasks(&ids, |id| {
+            let _ = on_start.send(id.to_owned());
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+fn perf_item(app: &AppHandle, id: &str) -> CmdResult<LaunchItem> {
+    let state = app.state::<AppState>();
+    let guard = state.perf.read();
+    let report = guard.as_ref().ok_or("Scan again first")?;
+    report.items.iter().find(|i| i.id == id).cloned().ok_or_else(|| format!("Unknown item {id}"))
+}
+
+/// Re-reads items after a change so the UI shows what launchd actually did.
+fn refresh_items(app: &AppHandle) -> Vec<LaunchItem> {
+    let items = performance::items::list(true);
+    if let Some(r) = app.state::<AppState>().perf.write().as_mut() {
+        r.items = items.clone();
+    }
+    items
+}
+
+#[tauri::command]
+pub async fn perf_set_item(app: AppHandle, id: String, enabled: bool) -> CmdResult<Vec<LaunchItem>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let item = perf_item(&app, &id)?;
+        performance::items::set_enabled(&item, enabled)?;
+        Ok(refresh_items(&app))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn perf_remove_item(app: AppHandle, id: String) -> CmdResult<Vec<LaunchItem>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let item = perf_item(&app, &id)?;
+        performance::items::remove(&item)?;
+        Ok(refresh_items(&app))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotState {
+    snapshots: Vec<performance::snapshots::Snapshot>,
+    purgeable: Option<u64>,
+}
+
+/// Deletes the given Time Machine snapshots (all when empty) and reports what's left.
+#[tauri::command]
+pub async fn perf_delete_snapshots(ids: Vec<String>) -> CmdResult<SnapshotState> {
+    tauri::async_runtime::spawn_blocking(move || {
+        performance::delete_snapshots(&ids)?;
+        Ok(SnapshotState { snapshots: performance::snapshots::list(), purgeable: performance::snapshots::purgeable() })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn open_login_items_settings() -> CmdResult<()> {
+    open(&["x-apple.systempreferences:com.apple.LoginItems-Settings.extension"])
 }
