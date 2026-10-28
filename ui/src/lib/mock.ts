@@ -421,6 +421,8 @@ let mockSettings: Settings = {
   checkUpdatesOnScan: true,
   onlineNotarization: true,
   offerTrashedAppCleanup: true,
+  careMode: "remind" as const,
+  careEveryDays: 7,
   ignore: location.hash.includes("ignored")
     ? [
         { kind: "path", value: `${HOME}/Sites/js/simpleworship`, label: "simpleworship", module: "settings", added: days(2) },

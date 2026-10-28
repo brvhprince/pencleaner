@@ -121,11 +121,14 @@ fn program_arguments(plist: &Path) -> Vec<String> {
     args
 }
 
-/// PenCleaner's own watcher agent: our label *and* the very binary doing this scan, so a
-/// copycat using our label with any other program is still checked.
-pub fn is_our_watcher(item: &LaunchItem) -> bool {
+/// PenCleaner's own login agent (Open at Login), bundled in the app.
+pub const LOGIN_LABEL: &str = "com.pen.cleaner.login";
+
+/// PenCleaner's own background items (the watcher, Open at Login): our label *and* the very
+/// binary doing this scan, so a copycat using our label with any other program is still checked.
+pub fn is_ours(item: &LaunchItem) -> bool {
     let same = |a: &Path, b: &Path| fs::canonicalize(a).ok().zip(fs::canonicalize(b).ok()).is_some_and(|(x, y)| x == y);
-    item.id == super::watch::LABEL
+    (item.id == super::watch::LABEL || item.id == LOGIN_LABEL)
         && item.executable.as_deref().zip(std::env::current_exe().ok()).is_some_and(|(e, me)| same(Path::new(e), &me))
 }
 
@@ -178,7 +181,7 @@ pub fn analyze(item: &LaunchItem, online: bool) -> Option<Finding> {
 /// and plists are what installers and malware plant.
 pub fn scan(online: bool) -> Vec<Finding> {
     let none = std::collections::HashSet::new();
-    let mut found: Vec<Finding> = items::from_plists(&none, &none).par_iter().filter(|i| !is_our_watcher(i)).filter_map(|i| analyze(i, online)).collect();
+    let mut found: Vec<Finding> = items::from_plists(&none, &none).par_iter().filter(|i| !is_ours(i)).filter_map(|i| analyze(i, online)).collect();
     found.sort_by_key(|f| (f.severity, f.item.name.to_lowercase()));
     found
 }
@@ -205,9 +208,11 @@ mod tests {
             broken: false,
             is_self: false,
         };
-        assert!(is_our_watcher(&mk(super::super::watch::LABEL, &me)));
-        assert!(!is_our_watcher(&mk(super::super::watch::LABEL, "/tmp/impostor")), "copycat label");
-        assert!(!is_our_watcher(&mk("com.other.agent", &me)));
+        assert!(is_ours(&mk(super::super::watch::LABEL, &me)));
+        assert!(is_ours(&mk(LOGIN_LABEL, &me)), "Open at Login");
+        assert!(!is_ours(&mk(LOGIN_LABEL, "/tmp/impostor")), "copycat login label");
+        assert!(!is_ours(&mk(super::super::watch::LABEL, "/tmp/impostor")), "copycat label");
+        assert!(!is_ours(&mk("com.other.agent", &me)));
     }
 
     #[test]

@@ -22,3 +22,7 @@ serde_json.workspace = true
 parking_lot.workspace = true
 base64 = "0.23"
 plist = "1"
+libc = "0.2"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }

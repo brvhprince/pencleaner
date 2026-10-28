@@ -2,7 +2,7 @@
   import { ArrowDown, ArrowUp, BatteryCharging, BatteryFull, BatteryLow, Cpu, HardDrive, Laptop, MemoryStick, Settings, ShieldCheck, ShieldOff, Sparkles, Trash, Wifi } from "@lucide/svelte";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
-  import { api, inTauri, type ActivityEvent, type TrashedApp, type Vitals } from "./lib/api";
+  import { api, inTauri, type ActivityEvent, type CareStatus, type TrashedApp, type Vitals } from "./lib/api";
   import { plural } from "./lib/format";
   import { ago, bytes } from "./lib/format";
 
@@ -10,6 +10,7 @@
   let xprotect = $state<string | null>(null);
   let watcher = $state(false);
   let events = $state<ActivityEvent[]>([]);
+  let care = $state<CareStatus | null>(null);
   let confirmTrash = $state(false);
   let emptying = $state(false);
 
@@ -51,7 +52,13 @@
 
   /** Slow-changing facts: once each time the popover opens. */
   async function refreshContext() {
-    const [about, w, acts] = await Promise.all([api.about().catch(() => null), api.protection.watcherStatus().catch(() => false), api.activity.list().catch(() => [])]);
+    const [about, w, acts, c] = await Promise.all([
+      api.about().catch(() => null),
+      api.protection.watcherStatus().catch(() => false),
+      api.activity.list().catch(() => []),
+      api.care.status().catch(() => null),
+    ]);
+    care = c;
     xprotect = about?.xprotect ?? null;
     watcher = w;
     events = acts;
@@ -111,6 +118,10 @@
     }
     if (v && v.trash > 1e9) {
       return { icon: Trash, title: `The Trash holds ${bytes(v.trash)}`, text: "Emptying it gives that space back.", action: confirmTrash ? `Empty ${bytes(v.trash)} for good?` : "Empty Trash", run: emptyTrash };
+    }
+    if (care?.due) {
+      const since = care.lastRun ? `Last run ${ago(care.lastRun)}.` : `You asked for one every ${care.everyDays === 1 ? "day" : `${care.everyDays} days`}.`;
+      return { icon: Sparkles, title: "Smart Care is due", text: since, action: "Run Smart Care", run: () => api.showMain("smartcare") };
     }
     if (v && v.memoryLevel !== "normal") {
       return { icon: MemoryStick, title: "Memory is under pressure", text: "See what's using it and free some up.", action: "Open Memory", run: () => api.showMain("performance") };

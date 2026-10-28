@@ -23,6 +23,8 @@ class AppState {
     checkUpdatesOnScan: true,
     onlineNotarization: true,
     offerTrashedAppCleanup: true,
+    careMode: "off",
+    careEveryDays: 7,
     ignore: [],
   });
 

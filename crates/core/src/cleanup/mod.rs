@@ -230,6 +230,10 @@ fn rules(category: Category) -> &'static [Rule] {
     }
 }
 
+/// Groups scheduled Smart Care may clean on its own: junk that rebuilds itself. The Trash,
+/// projects, simulators, VMs, iOS backups, Mail and AI models always wait for a person.
+pub const AUTO_GROUPS: [&str; 7] = ["user-caches", "user-logs", "temporary", "package-caches", "ide-caches", "xcode", "ai-caches"];
+
 pub const ALL: [Category; 5] = [Category::System, Category::Developer, Category::Ai, Category::Mail, Category::Trash];
 
 pub fn scan(categories: &[Category], ctl: &ScanControl) -> Report {
@@ -260,6 +264,16 @@ pub fn scan(categories: &[Category], ctl: &ScanControl) -> Report {
 }
 
 impl Report {
+    /// What an unattended clean may remove: recommended, warning-free items of the
+    /// self-rebuilding groups.
+    pub fn auto_ids(&self) -> HashSet<String> {
+        self.groups
+            .iter()
+            .filter(|g| AUTO_GROUPS.contains(&g.id))
+            .flat_map(|g| g.items.iter().filter(|i| i.recommended && i.warning.is_none()).map(|i| i.id.clone()))
+            .collect()
+    }
+
     /// Drops ignored items, and ignored paths from inside multi-path items.
     pub fn apply_ignore(&mut self, ig: &crate::settings::Ignore) {
         if ig.is_empty() {
@@ -358,6 +372,25 @@ mod tests {
             warning: None,
             action: Action::Paths(paths),
         }
+    }
+
+    #[test]
+    fn auto_clean_takes_only_safe_recommended_junk() {
+        let mut warned = item("cache-warned", vec![], 1);
+        warned.warning = Some("in use".into());
+        let mut unticked = item("cache-unticked", vec![], 1);
+        unticked.recommended = false;
+        let report = Report {
+            groups: vec![
+                group("user-caches", Category::System, "Caches", "", vec![item("cache-ok", vec![], 1), warned, unticked]),
+                group("trash", Category::Trash, "Trash", "", vec![item("trash", vec![], 1)]),
+                group("projects", Category::Developer, "Projects", "", vec![item("node_modules", vec![], 1)]),
+            ],
+            elapsed_ms: 0,
+            full_disk_access: true,
+            cancelled: false,
+        };
+        assert_eq!(report.auto_ids(), HashSet::from(["cache-ok".to_string()]));
     }
 
     #[test]

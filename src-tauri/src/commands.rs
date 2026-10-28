@@ -37,7 +37,7 @@ fn activity_log(app: &AppHandle) -> Option<activity::Log> {
 }
 
 /// Notes an action in My Activity. Never fails the action itself.
-fn record(app: &AppHandle, module: &str, action: &str, bytes: u64, items: usize, detail: Option<String>) {
+pub(crate) fn record(app: &AppHandle, module: &str, action: &str, bytes: u64, items: usize, detail: Option<String>) {
     if items == 0 && bytes == 0 {
         return;
     }
@@ -50,8 +50,8 @@ fn record(app: &AppHandle, module: &str, action: &str, bytes: u64, items: usize,
 pub struct AppState {
     lens: RwLock<Option<ScanTree>>,
     lens_ctl: Mutex<Option<Arc<ScanControl>>>,
-    cleanup: RwLock<Option<Report>>,
-    cleanup_ctl: Mutex<Option<Arc<ScanControl>>>,
+    pub(crate) cleanup: RwLock<Option<Report>>,
+    pub(crate) cleanup_ctl: Mutex<Option<Arc<ScanControl>>>,
     clutter: RwLock<Option<ClutterReport>>,
     clutter_ctl: Mutex<Option<Arc<ScanControl>>>,
     apps: RwLock<Option<AppsReport>>,
@@ -803,4 +803,50 @@ pub fn trashed_app_dismiss(app: AppHandle) {
     if let Some(w) = app.get_webview_window(crate::menubar::WINDOW) {
         let _ = w.hide();
     }
+}
+
+#[tauri::command]
+pub fn login_item_status() -> crate::login::LoginStatus {
+    crate::login::status()
+}
+
+#[tauri::command]
+pub fn login_item_set(on: bool) -> CmdResult<crate::login::LoginStatus> {
+    crate::login::set(on)
+}
+
+/// System Settings → Login Items, where a switched-off login item is approved again.
+#[tauri::command]
+pub fn open_login_items_for_app() {
+    crate::login::open_settings();
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CareStatus {
+    mode: pencleaner_core::settings::CareMode,
+    every_days: u32,
+    last_run: Option<i64>,
+    next_due: Option<i64>,
+    due: bool,
+}
+
+/// Scheduled Smart Care: when it last ran and when it's next due.
+#[tauri::command]
+pub fn care_status() -> CareStatus {
+    let settings = load_settings();
+    let state = pencleaner_core::care::load(&watch::data_dir());
+    let now = crate::care::now();
+    let next_due = pencleaner_core::care::next_due(&settings, &state, now);
+    CareStatus { mode: settings.care_mode, every_days: settings.care_every_days, last_run: state.last_run, next_due, due: next_due.is_some_and(|d| now >= d) }
+}
+
+/// Smart Care was run by hand: the schedule starts counting again.
+#[tauri::command]
+pub fn care_done() {
+    let dir = watch::data_dir();
+    let mut state = pencleaner_core::care::load(&dir);
+    state.last_run = Some(crate::care::now());
+    state.last_reminded = None;
+    pencleaner_core::care::save(&dir, &state);
 }

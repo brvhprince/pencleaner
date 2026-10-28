@@ -4,6 +4,7 @@
 pub mod activity;
 pub mod applications;
 pub mod apps;
+pub mod care;
 pub mod cleanup;
 pub mod clutter;
 pub mod error;

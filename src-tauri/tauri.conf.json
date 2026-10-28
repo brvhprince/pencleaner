@@ -24,7 +24,8 @@
           "x": 20,
           "y": 24
         },
-        "backgroundColor": "#1b1030"
+        "backgroundColor": "#1b1030",
+        "visible": false
       },
       {
         "label": "menubar",
@@ -72,7 +73,10 @@
     "macOS": {
       "minimumSystemVersion": "12.0",
       "entitlements": "Entitlements.plist",
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "files": {
+        "Library/LaunchAgents/com.pen.cleaner.login.plist": "LoginAgent.plist"
+      }
     }
   }
 }

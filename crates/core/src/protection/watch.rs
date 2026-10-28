@@ -114,8 +114,13 @@ fn notify(a: &Alert) {
         (None, Some(_)) => ("Suspicious background item added".to_owned(), format!("{}: {}", a.name, a.reasons.first().cloned().unwrap_or_default())),
         (None, None) => ("New background item".to_owned(), format!("{} will now run in the background.", a.name)),
     };
+    post_notification(&title, &body);
+}
+
+/// A macOS notification titled "PenCleaner".
+pub fn post_notification(subtitle: &str, body: &str) {
     let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("display notification \"{}\" with title \"PenCleaner\" subtitle \"{}\"", q(&body), q(&title));
+    let script = format!("display notification \"{}\" with title \"PenCleaner\" subtitle \"{}\"", q(body), q(subtitle));
     let _ = run_with_timeout("/usr/bin/osascript", &["-e", &script], Duration::from_secs(10));
 }
 

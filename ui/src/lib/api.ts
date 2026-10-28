@@ -412,6 +412,8 @@ export interface Settings {
   checkUpdatesOnScan: boolean;
   onlineNotarization: boolean;
   offerTrashedAppCleanup: boolean;
+  careMode: CareMode;
+  careEveryDays: number;
   ignore: IgnoreRule[];
 }
 
@@ -440,6 +442,22 @@ export interface TrashedApp {
   size: number;
 }
 
+export type CareMode = "off" | "remind" | "clean";
+
+export interface CareStatus {
+  mode: CareMode;
+  everyDays: number;
+  lastRun: number | null;
+  nextDue: number | null;
+  due: boolean;
+}
+
+export interface LoginStatus {
+  enabled: boolean;
+  needsApproval: boolean;
+  available: boolean;
+}
+
 export interface AboutInfo {
   version: string;
   commit: string;
@@ -456,6 +474,15 @@ const tauriApi = {
   vitals: () => invoke<Vitals>("vitals"),
   showMain: (module?: string) => invoke<void>("show_main", { module }),
   emptyTrash: () => invoke<number>("empty_trash"),
+  care: {
+    status: () => invoke<CareStatus>("care_status"),
+    done: () => invoke<void>("care_done"),
+  },
+  loginItem: {
+    status: () => invoke<LoginStatus>("login_item_status"),
+    set: (on: boolean) => invoke<LoginStatus>("login_item_set", { on }),
+    openSettings: () => invoke<void>("open_login_items_for_app"),
+  },
   trashedApp: {
     remove: () => invoke<CleanSummary>("trashed_app_remove"),
     dismiss: () => invoke<void>("trashed_app_dismiss"),
@@ -584,6 +611,15 @@ const mockApi: typeof tauriApi = {
   vitals: mock.vitals,
   showMain: async () => {},
   emptyTrash: async () => 2.4e9,
+  care: {
+    status: async (): Promise<CareStatus> => ({ mode: "remind", everyDays: 7, lastRun: Date.now() / 1000 - 9 * 86400, nextDue: Date.now() / 1000 - 2 * 86400, due: location.hash.includes("caredue") }),
+    done: async () => {},
+  },
+  loginItem: {
+    status: async () => ({ enabled: true, needsApproval: false, available: true }),
+    set: async (on: boolean) => ({ enabled: on, needsApproval: false, available: true }),
+    openSettings: async () => {},
+  },
   trashedApp: {
     remove: async () => ({ cleaned: ["x"], failed: [], bytesFreed: 214e6, byCategory: {} }) as CleanSummary,
     dismiss: async () => {},

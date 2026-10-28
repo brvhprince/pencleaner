@@ -27,6 +27,18 @@ pub struct IgnoreRule {
     pub added: i64,
 }
 
+/// Scheduled Smart Care.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum CareMode {
+    #[default]
+    Off,
+    /// A notification and a nudge in the menu bar when it's due.
+    Remind,
+    /// Cleans self-rebuilding junk on its own (never anything that asks for a password).
+    Clean,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -42,6 +54,8 @@ pub struct Settings {
     pub online_notarization: bool,
     /// When an app lands in the Trash, offer to remove what it left behind.
     pub offer_trashed_app_cleanup: bool,
+    pub care_mode: CareMode,
+    pub care_every_days: u32,
     pub ignore: Vec<IgnoreRule>,
 }
 
@@ -54,6 +68,8 @@ impl Default for Settings {
             check_updates_on_scan: true,
             online_notarization: true,
             offer_trashed_app_cleanup: true,
+            care_mode: CareMode::Off,
+            care_every_days: 7,
             ignore: Vec::new(),
         }
     }

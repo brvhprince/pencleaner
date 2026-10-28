@@ -2,7 +2,7 @@
 // stores so "Review" lands on that module's real results. My Clutter is left out on
 // purpose: it's personal files, and those always need a human decision.
 import { SvelteMap } from "svelte/reactivity";
-import type { CleanupItem } from "../../lib/api";
+import { api, type CleanupItem } from "../../lib/api";
 import { bytes, plural } from "../../lib/format";
 import { app } from "../../lib/state.svelte";
 import { apps, key as appKey } from "../applications/apps.svelte";
@@ -102,6 +102,8 @@ class SmartCare {
 
     this.setPhase("done");
     app.refreshVolumes();
+    // A Smart Care by hand resets the schedule's clock.
+    api.care.done().catch(() => {});
   }
 
   startOver() {

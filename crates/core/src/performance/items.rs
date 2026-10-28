@@ -44,7 +44,7 @@ pub struct LaunchItem {
     pub app_name: Option<String>,
     /// Its plist or program no longer exists.
     pub broken: bool,
-    /// PenCleaner's own background watcher: switched in PenCleaner's Settings, not here.
+    /// PenCleaner's own (the watcher, Open at Login): switched in PenCleaner's Settings, not here.
     pub is_self: bool,
 }
 
@@ -208,7 +208,7 @@ fn merge(mut items: Vec<LaunchItem>, btm: Vec<LaunchItem>) -> Vec<LaunchItem> {
     items
 }
 
-const SELF_MSG: &str = "That's PenCleaner's own background watcher. Turn it off in PenCleaner's Settings → Protection.";
+const SELF_MSG: &str = "That's one of PenCleaner's own items. Change it in PenCleaner's Settings.";
 
 fn run(cmd: &str, args: &[&str]) -> String {
     Command::new(cmd).args(args).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
@@ -303,7 +303,7 @@ pub fn list(open_at_login_apps: bool) -> Vec<LaunchItem> {
 
     // Full List builds on this list, so it inherits the marking too.
     for i in &mut items {
-        i.is_self = crate::protection::persistence::is_our_watcher(i);
+        i.is_self = crate::protection::persistence::is_ours(i);
     }
     items.sort_by_key(|i| (i.kind as u8, !i.enabled, i.name.to_lowercase()));
     items

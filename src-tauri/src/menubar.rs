@@ -75,6 +75,8 @@ fn place_and_show<R: Runtime>(win: &tauri::WebviewWindow<R>, icon: Rect) {
 }
 
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
+    // Back in the Dock if it started at login as menu bar only.
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     if let Some(m) = app.get_webview_window("main") {
         let _ = m.show();
         let _ = m.unminimize();

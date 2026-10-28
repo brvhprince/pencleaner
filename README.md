@@ -51,6 +51,8 @@ drives Space Lens through every state against the mock backend, and
 | Space Lens | Bubble map of what's using the disk |
 | Settings | Thresholds, network switches, watcher, and the Ignore List (⌘,) |
 | Menu bar | Mac health, protection status, disk/memory/CPU/battery/network/Trash tiles, one recommendation |
+| Scheduled Smart Care | Remind, or clean self-rebuilding junk (caches, logs, temp files) on a schedule; never prompts |
+| Open at Login | Registered with SMAppService; starts in the menu bar only |
 | My Activity | History of everything freed, removed or run (`~/Library/Application Support/com.pen.cleaner/activity.jsonl`) |
 
 ## Settings and the Ignore List

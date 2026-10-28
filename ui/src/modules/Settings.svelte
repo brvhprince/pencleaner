@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { EyeOff, FolderMinus, FolderOpen, Globe, Shield, SlidersHorizontal, Trash } from "@lucide/svelte";
+  import { ExternalLink, EyeOff, FolderMinus, FolderOpen, Globe, Power, Shield, SlidersHorizontal, Trash } from "@lucide/svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
-  import { api, inTauri, type IgnoreRule } from "../lib/api";
+  import { api, inTauri, type IgnoreRule, type LoginStatus } from "../lib/api";
   import Switch from "../lib/components/Switch.svelte";
   import { ago, plural } from "../lib/format";
   import { MODULE, type ModuleId } from "../lib/modules";
@@ -16,6 +16,26 @@
   $effect(() => {
     api.protection.watcherStatus().then((on) => (watcher = on));
   });
+
+  let login = $state<LoginStatus | null>(null);
+  $effect(() => {
+    api.loginItem.status().then((st) => (login = st));
+  });
+  // Coming back from System Settings: pick up an approval made there.
+  $effect(() => {
+    const again = () => api.loginItem.status().then((st) => (login = st));
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  });
+
+  async function setLogin(on: boolean) {
+    try {
+      login = await api.loginItem.set(on);
+      if (login.needsApproval) app.toast("macOS has PenCleaner switched off in Login Items. Switch it on there.", "error");
+    } catch (e) {
+      app.toast(String(e), "error");
+    }
+  }
 
   async function setWatcher(on: boolean) {
     await protection.setWatcher(on);
@@ -46,6 +66,8 @@
     return `Hidden from ${moduleTitle(head)}`;
   }
 
+  const CARE_EVERY = [[1, "day"], [3, "3 days"], [7, "week"], [14, "2 weeks"], [30, "month"]] as const;
+
   const STALE = [7, 14, 30, 60, 90, 180, 365];
   const LARGE = [25, 50, 100, 250, 500, 1000];
   const UNUSED = [[90, "3 months"], [180, "6 months"], [365, "a year"]] as const;
@@ -59,6 +81,55 @@
 
   <div class="cols">
     <div class="col">
+      <div class="card glass">
+        <h3><Power size={15} /> General</h3>
+        <div class="row">
+          <span>
+            <strong>Open PenCleaner at login</strong>
+            {#if login && !login.available}
+              <em>Works in the installed app (macOS 13 or later)</em>
+            {:else if login?.needsApproval}
+              <em class="warn">Switched off in System Settings → Login Items</em>
+            {:else}
+              <em>Starts quietly in the menu bar, without its window</em>
+            {/if}
+          </span>
+          {#if login?.needsApproval}
+            <button class="btn" onclick={() => api.loginItem.openSettings()}>Open Settings <ExternalLink size={11} /></button>
+          {:else if login}
+            <Switch on={login.enabled} label="Open at login" disabled={!login.available} onchange={setLogin} />
+          {/if}
+        </div>
+        <label class="row">
+          <span>
+            <strong>Scheduled Smart Care</strong>
+            {#if s.careMode === "clean"}
+              <em>Clears caches, logs and temp files on its own; never the Trash, projects or anything needing your password</em>
+            {:else if s.careMode === "remind"}
+              <em>A notification and a nudge in the menu bar when it's due</em>
+            {:else}
+              <em>Runs while PenCleaner is open, so pair it with Open at Login</em>
+            {/if}
+          </span>
+          <select value={s.careMode} onchange={(e) => app.saveSettings({ careMode: e.currentTarget.value as "off" | "remind" | "clean" })}>
+            <option value="off">Off</option>
+            <option value="remind">Remind me</option>
+            <option value="clean">Clean automatically</option>
+          </select>
+        </label>
+        {#if s.careMode !== "off"}
+          <label class="row">
+            <span>
+              <strong>Every</strong>
+              <em>Counted from the last Smart Care, by hand or scheduled</em>
+            </span>
+            <select value={s.careEveryDays} onchange={(e) => app.saveSettings({ careEveryDays: +e.currentTarget.value })}>
+              {#each CARE_EVERY as [d, label] (d)}<option value={d}>{label}</option>{/each}
+            </select>
+          </label>
+        {/if}
+      </div>
+
       <div class="card glass">
         <h3><SlidersHorizontal size={15} /> Scanning</h3>
         <label class="row">
@@ -243,6 +314,9 @@
     font-style: normal;
     font-size: 11.5px;
     color: var(--text-3);
+  }
+  em.warn {
+    color: #ffc46b;
   }
   select {
     font: inherit;

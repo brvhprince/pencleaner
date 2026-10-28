@@ -1,4 +1,6 @@
+mod care;
 mod commands;
+mod login;
 mod menu;
 mod menubar;
 mod trash_watch;
@@ -7,6 +9,11 @@ use commands::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let background = std::env::args().any(|a| a == login::BACKGROUND_FLAG);
+    // Open at Login's agent starting while PenCleaner is already open: nothing to do.
+    if !login::claim_single_instance() && background {
+        return;
+    }
     pencleaner_core::fsutil::set_observer_io_policy();
     // An enabled watcher must call this copy of PenCleaner, wherever it now lives.
     std::thread::spawn(|| {
@@ -18,9 +25,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
-        .setup(|app| {
+        .setup(move |app| {
             menubar::install(app.handle())?;
+            // Started at login: menu bar only, no window and no Dock icon until it's opened.
+            if background {
+                let _ = app.handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+            } else {
+                menubar::show_main(app.handle());
+            }
             trash_watch::start(app.handle().clone());
+            care::start(app.handle().clone());
             Ok(())
         })
         .on_window_event(|win, event| {
@@ -93,6 +107,11 @@ pub fn run() {
             commands::empty_trash,
             commands::trashed_app_remove,
             commands::trashed_app_dismiss,
+            commands::login_item_status,
+            commands::care_status,
+            commands::care_done,
+            commands::login_item_set,
+            commands::open_login_items_for_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while building PenCleaner")
