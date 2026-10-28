@@ -393,6 +393,42 @@ export function fileSrc(path: string) {
   return inTauri ? convertFileSrc(path) : mock.thumb(path);
 }
 
+export type IgnoreKind = "path" | "item";
+
+export interface IgnoreRule {
+  kind: IgnoreKind;
+  value: string;
+  label: string;
+  module: string;
+  added: number;
+}
+
+export interface Settings {
+  staleProjectDays: number;
+  largeFileMb: number;
+  unusedAppDays: number;
+  checkUpdatesOnScan: boolean;
+  onlineNotarization: boolean;
+  ignore: IgnoreRule[];
+}
+
+export interface Vitals {
+  model: string;
+  diskName: string;
+  diskFree: number;
+  diskTotal: number;
+  memoryPressure: number;
+  memoryLevel: "normal" | "warning" | "critical";
+  swapUsed: number;
+  cpuLoad: number;
+  battery: { percent: number; state: string; remaining: string | null; cycles: number | null; health: number | null } | null;
+  netUp: number;
+  netDown: number;
+  trash: number;
+  uptimeSecs: number;
+  health: "good" | "fair" | "attention";
+}
+
 export interface AboutInfo {
   version: string;
   commit: string;
@@ -406,6 +442,15 @@ export interface AboutInfo {
 const tauriApi = {
   systemInfo: () => invoke<SystemInfo>("system_info"),
   about: () => invoke<AboutInfo>("about_info"),
+  vitals: () => invoke<Vitals>("vitals"),
+  showMain: (module?: string) => invoke<void>("show_main", { module }),
+  emptyTrash: () => invoke<number>("empty_trash"),
+  settings: {
+    get: () => invoke<Settings>("settings_get"),
+    save: (settings: Settings) => invoke<Settings>("settings_save", { settings }),
+    ignore: (kind: IgnoreKind, value: string, label: string, module: string) => invoke<Settings>("ignore_add", { kind, value, label, module }),
+    unignore: (kind: IgnoreKind, value: string) => invoke<Settings>("ignore_remove", { kind, value }),
+  },
   volumes: () => invoke<Volume[]>("volumes_list"),
   openFullDiskAccessSettings: () => invoke<void>("open_full_disk_access_settings"),
   revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),
@@ -509,6 +554,7 @@ const tauriApi = {
     openSettings: (anchor: string) => invoke<void>("open_privacy_settings", { anchor }),
     setWatcher: (enabled: boolean) => invoke<{ enabled: boolean; alerts: WatchAlert[] }>("watcher_set", { enabled }),
     clearAlerts: () => invoke<void>("watcher_clear_alerts"),
+    watcherStatus: () => invoke<boolean>("watcher_status"),
   },
 
   remove(items: { path: string; size?: number }[], mode: RemoveMode, onEvent: (e: RemoveEvent) => void) {
@@ -520,6 +566,10 @@ const tauriApi = {
 
 const mockApi: typeof tauriApi = {
   systemInfo: mock.systemInfo,
+  vitals: mock.vitals,
+  showMain: async () => {},
+  emptyTrash: async () => 2.4e9,
+  settings: mock.settings,
   about: async () => ({ version: "0.1.0", commit: "b39b86b+", builtAt: Date.now() / 1000 - 3600, macos: "26.6.2", arch: "Intel", fullDiskAccess: true, xprotect: "5368" }),
   volumes: mock.volumes,
   openFullDiskAccessSettings: async () => {},

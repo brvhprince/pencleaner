@@ -1,6 +1,8 @@
 // Fake backend for running the UI in a plain browser (`pnpm dev`, then open
 // http://localhost:1420). Lets the UI be designed and screenshotted without Tauri.
 import type {
+  IgnoreKind,
+  Settings,
   Grant,
   PrivacyItem,
   ProtectionReport,
@@ -407,6 +409,41 @@ const protection = {
   clearAlerts: async () => {
     watchAlerts = [];
   },
+  watcherStatus: async () => watcherOn,
+};
+
+let mockSettings: Settings = {
+  staleProjectDays: 30,
+  largeFileMb: 50,
+  unusedAppDays: 180,
+  checkUpdatesOnScan: true,
+  onlineNotarization: true,
+  ignore: location.hash.includes("ignored")
+    ? [
+        { kind: "path", value: `${HOME}/Sites/js/simpleworship`, label: "simpleworship", module: "settings", added: days(2) },
+        { kind: "item", value: "updates:/Applications/Xcode.app@27.1", label: "Xcode 27.1", module: "applications", added: days(1) },
+        { kind: "item", value: "cleanup:sim:F95A08D0", label: "iPhone 16 Pro Max (iOS 18.6)", module: "cleanup", added: days(5) },
+        { kind: "item", value: "protection:suspicious:homebrew.mxcl.kafka", label: "kafka-server-start", module: "protection", added: days(9) },
+      ]
+    : [],
+};
+
+const settings = {
+  get: async () => structuredClone(mockSettings),
+  save: async (s: Settings) => {
+    mockSettings = { ...s, ignore: mockSettings.ignore };
+    return structuredClone(mockSettings);
+  },
+  ignore: async (kind: IgnoreKind, value: string, label: string, module: string) => {
+    if (!mockSettings.ignore.some((r) => r.kind === kind && r.value === value)) {
+      mockSettings.ignore.push({ kind, value, label, module, added: Date.now() / 1000 });
+    }
+    return structuredClone(mockSettings);
+  },
+  unignore: async (kind: IgnoreKind, value: string) => {
+    mockSettings.ignore = mockSettings.ignore.filter((r) => !(r.kind === kind && r.value === value));
+    return structuredClone(mockSettings);
+  },
 };
 
 const perf = {
@@ -595,6 +632,26 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const mock = {
   perf,
+  async vitals() {
+    const j = () => Math.random();
+    return {
+      model: "MacBook Pro",
+      diskName: "WANPEN",
+      diskFree: 312.6 * GB,
+      diskTotal: 1000.2 * GB,
+      memoryPressure: 36 + Math.round(j() * 4),
+      memoryLevel: "normal" as const,
+      swapUsed: 7 * GB,
+      cpuLoad: 8 + Math.round(j() * 30),
+      battery: { percent: 100, state: "charged", remaining: null, cycles: 878, health: 72 },
+      netUp: Math.round(j() * 40_000),
+      netDown: Math.round(j() * 2_000_000),
+      trash: location.hash.includes("fulltrash") ? 2.4 * GB : 0,
+      uptimeSecs: 589300,
+      health: "good" as const,
+    };
+  },
+  settings,
   protection,
   activity: {
     list: async () => activity,

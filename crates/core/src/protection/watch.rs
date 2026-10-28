@@ -81,7 +81,8 @@ fn changes(dir: &Path) -> Vec<String> {
 }
 
 fn analyze(item: &LaunchItem, engine: Option<&malware::Engine>) -> Alert {
-    let finding = persistence::analyze(item);
+    let online = crate::settings::load(&data_dir()).online_notarization;
+    let finding = persistence::analyze(item, online);
     let program = finding.as_ref().map(|f| f.program.clone()).or_else(|| item.executable.clone());
     let malware = match (engine, program.as_deref()) {
         (Some(e), Some(p)) if malware::worth_scanning(Path::new(p)) => {

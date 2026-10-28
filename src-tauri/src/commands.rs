@@ -7,6 +7,7 @@ use pencleaner_core::activity::{self, Event};
 use pencleaner_core::applications::{self, AppsReport, Target};
 use pencleaner_core::clutter::{self, ClutterReport};
 use pencleaner_core::protection::{self, permissions as app_permissions, privacy, watch, ProtectionReport};
+use pencleaner_core::settings::{self as user_settings, IgnoreKind, Settings};
 use pencleaner_core::updater::{self, UpdateEvent, UpdatesReport};
 use pencleaner_core::performance::{self, items::LaunchItem, memory, PerfReport, TaskResult};
 use pencleaner_core::progress::{Progress, ScanControl};
@@ -25,6 +26,11 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 type CmdResult<T> = Result<T, String>;
+
+/// Settings live beside the activity log, in PenCleaner's data folder.
+fn load_settings() -> Settings {
+    user_settings::load(&watch::data_dir())
+}
 
 fn activity_log(app: &AppHandle) -> Option<activity::Log> {
     app.path().app_data_dir().ok().map(|d| activity::Log::new(&d))
@@ -54,6 +60,7 @@ pub struct AppState {
     updates: RwLock<Option<UpdatesReport>>,
     protection: RwLock<Option<ProtectionReport>>,
     protection_ctl: Mutex<Option<Arc<ScanControl>>>,
+    vitals: pencleaner_core::vitals::Sampler,
 }
 
 #[derive(Serialize)]
@@ -241,7 +248,8 @@ pub async fn cleanup_scan(
     done.store(true, Ordering::Relaxed);
     *state.cleanup_ctl.lock() = None;
 
-    let report = result?;
+    let mut report = result?;
+    report.apply_ignore(&load_settings().matcher());
     *state.cleanup.write() = (!report.cancelled).then(|| report.clone());
     Ok(report)
 }
@@ -285,7 +293,13 @@ pub async fn clutter_scan(app: AppHandle, root: String, on_progress: Channel<Pro
     *state.clutter_ctl.lock() = Some(ctl.clone());
     let done = stream_progress(ctl.clone(), on_progress);
     let root = PathBuf::from(root);
-    let result = tauri::async_runtime::spawn_blocking(move || clutter::scan(&root, &ctl))
+    let prefs = load_settings();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let ig = prefs.matcher();
+        let mut r = clutter::scan_with(&root, prefs.large_file_mb * 1_000_000, &ig, &ctl);
+        r.apply_ignore(&ig);
+        r
+    })
         .await
         .map_err(|e| e.to_string());
     done.store(true, Ordering::Relaxed);
@@ -332,7 +346,8 @@ pub async fn apps_scan(app: AppHandle, on_progress: Channel<Progress>) -> CmdRes
         .await
         .map_err(|e| e.to_string());
     done.store(true, Ordering::Relaxed);
-    let report = result?;
+    let mut report = result?;
+    report.apply_ignore(&load_settings().matcher());
     *app.state::<AppState>().apps.write() = Some(report.clone());
     Ok(report)
 }
@@ -511,13 +526,14 @@ pub fn activity_clear(app: AppHandle) -> CmdResult<()> {
 #[tauri::command]
 pub async fn updates_scan(app: AppHandle, on_step: Channel<String>) -> CmdResult<UpdatesReport> {
     let cache = app.path().app_cache_dir().ok();
-    let report = tauri::async_runtime::spawn_blocking(move || {
+    let mut report = tauri::async_runtime::spawn_blocking(move || {
         updater::scan(cache.as_deref(), |step| {
             let _ = on_step.send(step.to_owned());
         })
     })
     .await
     .map_err(|e| e.to_string())?;
+    report.apply_ignore(&load_settings().matcher());
     *app.state::<AppState>().updates.write() = Some(report.clone());
     Ok(report)
 }
@@ -552,7 +568,14 @@ pub async fn protection_scan(app: AppHandle, on_progress: Channel<Progress>) -> 
     let ctl = Arc::new(ScanControl::new());
     *state.protection_ctl.lock() = Some(ctl.clone());
     let done = stream_progress(ctl.clone(), on_progress);
-    let result = tauri::async_runtime::spawn_blocking(move || protection::scan(&ctl)).await.map_err(|e| e.to_string());
+    let prefs = load_settings();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut r = protection::scan(&ctl, prefs.online_notarization);
+        r.apply_ignore(&prefs.matcher());
+        r
+    })
+    .await
+    .map_err(|e| e.to_string());
     done.store(true, Ordering::Relaxed);
     *state.protection_ctl.lock() = None;
     let report = result?;
@@ -658,6 +681,100 @@ pub fn watcher_set(enabled: bool) -> CmdResult<WatcherState> {
 }
 
 #[tauri::command]
+pub fn watcher_status() -> bool {
+    watch::is_enabled()
+}
+
+#[tauri::command]
 pub fn watcher_clear_alerts() {
     watch::clear_alerts(&watch::data_dir());
+}
+
+#[tauri::command]
+pub fn settings_get() -> Settings {
+    load_settings()
+}
+
+/// Saves everything except the ignore list, which has its own commands.
+#[tauri::command]
+pub fn settings_save(settings: Settings) -> CmdResult<Settings> {
+    let mut s = settings;
+    s.ignore = load_settings().ignore;
+    user_settings::save(&watch::data_dir(), &s)?;
+    Ok(s)
+}
+
+/// Prunes the cached results right away, so a clean or remove can't reach the item.
+fn apply_ignore_to_cached(app: &AppHandle, s: &Settings) {
+    let ig = s.matcher();
+    let state = app.state::<AppState>();
+    if let Some(r) = state.cleanup.write().as_mut() {
+        r.apply_ignore(&ig);
+    }
+    if let Some(r) = state.clutter.write().as_mut() {
+        r.apply_ignore(&ig);
+    }
+    if let Some(r) = state.apps.write().as_mut() {
+        r.apply_ignore(&ig);
+    }
+    if let Some(r) = state.updates.write().as_mut() {
+        r.apply_ignore(&ig);
+    }
+    if let Some(r) = state.protection.write().as_mut() {
+        r.apply_ignore(&ig);
+    };
+}
+
+#[tauri::command]
+pub fn ignore_add(app: AppHandle, kind: IgnoreKind, value: String, label: String, module: String) -> CmdResult<Settings> {
+    if kind == IgnoreKind::Path && !Path::new(&value).is_absolute() {
+        return Err("Only absolute paths can be ignored".into());
+    }
+    let mut s = load_settings();
+    s.add_ignore(kind, &value, &label, &module);
+    user_settings::save(&watch::data_dir(), &s)?;
+    apply_ignore_to_cached(&app, &s);
+    Ok(s)
+}
+
+/// Un-ignoring shows the item again from the next scan.
+#[tauri::command]
+pub fn ignore_remove(kind: IgnoreKind, value: String) -> CmdResult<Settings> {
+    let mut s = load_settings();
+    s.remove_ignore(kind, &value);
+    user_settings::save(&watch::data_dir(), &s)?;
+    Ok(s)
+}
+
+/// Live numbers for the menu bar popover (cheap; polled every couple of seconds).
+#[tauri::command]
+pub async fn vitals(app: AppHandle) -> CmdResult<pencleaner_core::vitals::Vitals> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().vitals.read()).await.map_err(|e| e.to_string())
+}
+
+/// Brings the main window forward, optionally on a module.
+#[tauri::command]
+pub fn show_main(app: AppHandle, module: Option<String>) {
+    if let Some(p) = app.get_webview_window(crate::menubar::WINDOW) {
+        let _ = p.hide();
+    }
+    crate::menubar::show_main(&app);
+    if let Some(m) = module {
+        let _ = tauri::Emitter::emit_to(&app, "main", "navigate", m);
+    }
+}
+
+/// Empties the Trash on the startup disk (permanently). Returns the bytes freed.
+#[tauri::command]
+pub async fn empty_trash(app: AppHandle) -> CmdResult<u64> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let trash = fsutil::home_dir().join(".Trash");
+        let entries: Vec<PathBuf> = std::fs::read_dir(&trash).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).collect();
+        let items: Vec<RemoveItem> = entries.into_iter().map(|path| RemoveItem { path, size: None }).collect();
+        let summary = remove::remove_items(&items, RemoveMode::Delete, |_| {});
+        record(&app, "cleanup", "Emptied the Trash", summary.bytes_freed, summary.removed.len(), None);
+        if summary.failed.is_empty() { Ok(summary.bytes_freed) } else { Err(summary.failed[0].1.clone()) }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

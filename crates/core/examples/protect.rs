@@ -20,7 +20,7 @@ fn main() {
         return;
     }
     let t = Instant::now();
-    let findings = persistence::scan();
+    let findings = persistence::scan(true);
     println!("Background items: {} flagged in {:?}", findings.len(), t.elapsed());
     for f in &findings {
         println!("  {:?} {:<30} {:?}\n      program {}\n      {}", f.severity, f.item.name, f.signer, f.program, f.reasons.join("; "));

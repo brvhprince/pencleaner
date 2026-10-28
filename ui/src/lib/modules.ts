@@ -19,6 +19,7 @@ import {
   Power,
   Rocket,
   ShieldCheck,
+  Settings as SettingsIcon,
   Bug,
   EyeOff,
   KeyRound,
@@ -38,7 +39,8 @@ export type ModuleId =
   | "clutter"
   | "spacelens"
   | "tools"
-  | "activity";
+  | "activity"
+  | "settings";
 
 export interface Theme {
   /** Window background. */
@@ -188,6 +190,16 @@ export const MODULES: ModuleDef[] = [
     illustration: "insights",
     features: [],
     theme: theme("#14112a", "#241e3f", "#3a2c5c", "#3c3470", "#8fa8ff", "#bccbff"),
+    secondary: true,
+  },
+  {
+    id: "settings",
+    title: "Settings",
+    tagline: "How PenCleaner scans, and what it should leave alone.",
+    icon: SettingsIcon,
+    illustration: "permissions",
+    features: [],
+    theme: theme("#16141f", "#25222f", "#3a3548", "#3d3858", "#a99cff", "#cfc6ff"),
     secondary: true,
   },
 ];

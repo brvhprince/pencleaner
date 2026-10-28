@@ -157,6 +157,8 @@ fn with_spotlight(mut info: FileInfo) -> FileInfo {
 struct Walk<'a> {
     ctl: &'a ScanControl,
     home: PathBuf,
+    /// Ignored folders: never walked.
+    skip: &'a [PathBuf],
     out: Mutex<Vec<Rec>>,
 }
 
@@ -204,6 +206,7 @@ fn walk(dir: &Path, depth: usize, w: &Walk) {
                 || name == "node_modules"
                 || BUNDLE_EXTS.contains(&ext)
                 || (dir == w.home && name == "Library")
+                || w.skip.iter().any(|s| path.starts_with(s))
                 || is_build_artifact(name, path, &names))
         })
         .map(|(_, p)| p)
@@ -243,15 +246,21 @@ fn downloads(root: &Path, ctl: &ScanControl) -> Vec<FileInfo> {
 }
 
 pub fn scan(root: &Path, ctl: &ScanControl) -> ClutterReport {
+    scan_with(root, LARGE_FILE, &crate::settings::Ignore::default(), ctl)
+}
+
+/// `large`: the "large file" threshold in bytes. Ignored folders are never walked and
+/// ignored files never reported.
+pub fn scan_with(root: &Path, large: u64, ignore: &crate::settings::Ignore, ctl: &ScanControl) -> ClutterReport {
     let started = Instant::now();
     fsutil::set_observer_io_policy();
-    let w = Walk { ctl, home: home_dir(), out: Mutex::new(Vec::new()) };
+    let w = Walk { ctl, home: home_dir(), skip: ignore.paths(), out: Mutex::new(Vec::new()) };
     walk(root, 0, &w);
     let recs = w.out.into_inner();
     let files_scanned = ctl.snapshot().items;
 
     let mut large: Vec<FileInfo> =
-        recs.par_iter().filter(|r| r.len >= LARGE_FILE).map(|r| with_spotlight(r.info())).collect();
+        recs.par_iter().filter(|r| r.len >= large).map(|r| with_spotlight(r.info())).collect();
     large.sort_unstable_by_key(|f| std::cmp::Reverse(f.size));
 
     let duplicates = if ctl.is_cancelled() { vec![] } else { duplicates::find(&recs, ctl) };
@@ -276,6 +285,28 @@ pub fn scan(root: &Path, ctl: &ScanControl) -> ClutterReport {
 }
 
 impl ClutterReport {
+    /// Drops ignored files; duplicate and similar sets left with one file disappear.
+    pub fn apply_ignore(&mut self, ig: &crate::settings::Ignore) {
+        if ig.is_empty() {
+            return;
+        }
+        let gone = |f: &FileInfo| ig.path_str(&f.path) || ig.item(&format!("clutter:{}", f.path));
+        self.large.retain(|f| !gone(f));
+        self.downloads.retain(|f| !gone(f));
+        for sets in [&mut self.duplicates, &mut self.similar] {
+            for s in sets.iter_mut() {
+                s.files.retain(|f| !gone(f));
+                if !s.files.iter().any(|f| f.path == s.keep) {
+                    if let Some(first) = s.files.first() {
+                        s.keep = first.path.clone();
+                    }
+                }
+                s.reclaimable = s.files.iter().filter(|f| f.path != s.keep).map(|f| f.size).sum();
+            }
+            sets.retain(|s| s.files.len() > 1 && !ig.item(&format!("clutter:{}", s.id)));
+        }
+    }
+
     fn known_paths(&self) -> HashSet<&str> {
         let sets = self.duplicates.iter().chain(&self.similar).flat_map(|s| &s.files);
         self.large.iter().chain(&self.downloads).chain(sets).map(|f| f.path.as_str()).collect()

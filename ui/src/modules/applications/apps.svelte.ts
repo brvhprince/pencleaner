@@ -16,11 +16,13 @@ export const SECTIONS: { id: Section; title: string; blurb: string; icon: Compon
 ];
 
 const DAY = 86400;
-/** Apps not opened for this long count as unused. */
-export const UNUSED_DAYS = 180;
+/** Apps not opened for this long count as unused (Settings). */
+export function unusedDays() {
+  return app.settings.unusedAppDays;
+}
 
 export function isUnused(a: AppEntry) {
-  return a.lastUsed !== null && Date.now() / 1000 - a.lastUsed > UNUSED_DAYS * DAY;
+  return a.lastUsed !== null && Date.now() / 1000 - a.lastUsed > unusedDays() * DAY;
 }
 
 /** Selection keys are "kind:id" so the three lists can share one set. */
@@ -137,7 +139,7 @@ class Apps {
   async scan() {
     this.progress = null;
     this.setPhase("scanning");
-    void this.checkUpdates();
+    if (app.settings.checkUpdatesOnScan) void this.checkUpdates();
     try {
       this.report = await api.apps.scan((p) => (this.progress = p));
       this.selected.clear();
@@ -218,6 +220,19 @@ class Apps {
       app.toast(`Removal stopped: ${e}`, "error");
       this.sheet = "closed";
     }
+  }
+
+  /** "Skip this version": a newer one shows up again. */
+  async skipUpdate(u: AppUpdate) {
+    if (!(await app.ignore("item", `updates:${u.id}@${u.latest}`, `${u.name} ${u.latest}`, "applications"))) return;
+    this.updatePicked.delete(u.id);
+    if (this.updates) this.updates = { ...this.updates, updates: this.updates.updates.filter((x) => x.id !== u.id) };
+  }
+
+  async ignoreLeftover(id: string) {
+    if (!(await app.ignore("item", `applications:leftover:${id}`, id, "applications"))) return;
+    this.selected.delete(key({ kind: "leftover", id }));
+    if (this.report) this.report = { ...this.report, leftovers: this.report.leftovers.filter((l) => l.id !== id) };
   }
 
   startOver() {

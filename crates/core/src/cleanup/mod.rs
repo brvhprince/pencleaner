@@ -260,6 +260,33 @@ pub fn scan(categories: &[Category], ctl: &ScanControl) -> Report {
 }
 
 impl Report {
+    /// Drops ignored items, and ignored paths from inside multi-path items.
+    pub fn apply_ignore(&mut self, ig: &crate::settings::Ignore) {
+        if ig.is_empty() {
+            return;
+        }
+        for g in &mut self.groups {
+            g.items.retain_mut(|i| {
+                if ig.item(&format!("cleanup:{}", i.id)) || i.path.as_deref().is_some_and(|p| ig.path_str(p)) {
+                    return false;
+                }
+                if let Action::Paths(paths) = &mut i.action {
+                    let before = paths.len();
+                    paths.retain(|p| !ig.path(p));
+                    if paths.is_empty() {
+                        return false;
+                    }
+                    if paths.len() != before {
+                        i.size = paths.iter().map(|p| fsutil::disk_usage(p)).sum();
+                    }
+                }
+                true
+            });
+            g.size = g.items.iter().map(|i| i.size).sum();
+        }
+        self.groups.retain(|g| !g.items.is_empty() || g.note.is_some());
+    }
+
     /// Removes the chosen items and drops them from the report.
     pub fn clean(&mut self, ids: &HashSet<String>, mut on_event: impl FnMut(CleanEvent)) -> CleanSummary {
         let remover = Remover::default();
@@ -330,6 +357,30 @@ mod tests {
             recommended: true,
             warning: None,
             action: Action::Paths(paths),
+        }
+    }
+
+    #[test]
+    fn ignore_list_drops_items_and_parts_of_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("proj/node_modules"), dir.path().join("proj/target"));
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let mut report = Report {
+            groups: vec![group("g", Category::Developer, "G", "", vec![item("project", vec![a.clone(), b.clone()], 10), item("sim", vec![], 5)])],
+            elapsed_ms: 0,
+            full_disk_access: true,
+            cancelled: false,
+        };
+        let mut s = crate::settings::Settings::default();
+        s.add_ignore(crate::settings::IgnoreKind::Path, &b.to_string_lossy(), "target", "cleanup");
+        s.add_ignore(crate::settings::IgnoreKind::Item, "cleanup:sim", "sim", "cleanup");
+        report.apply_ignore(&s.matcher());
+        let items = &report.groups[0].items;
+        assert_eq!(items.len(), 1, "ignored id dropped");
+        match &items[0].action {
+            Action::Paths(p) => assert_eq!(p, &vec![a.clone()], "ignored folder taken out of the item"),
+            _ => unreachable!(),
         }
     }
 

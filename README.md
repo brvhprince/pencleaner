@@ -49,7 +49,35 @@ drives Space Lens through every state against the mock backend, and
 | Applications | Uninstaller with support files, App Updater, leftovers of removed apps, installer files |
 | My Clutter | Duplicates, similar images, large and old files, Downloads |
 | Space Lens | Bubble map of what's using the disk |
+| Settings | Thresholds, network switches, watcher, and the Ignore List (⌘,) |
+| Menu bar | Mac health, protection status, disk/memory/CPU/battery/network/Trash tiles, one recommendation |
 | My Activity | History of everything freed, removed or run (`~/Library/Application Support/com.pen.cleaner/activity.jsonl`) |
+
+## Settings and the Ignore List
+
+Stored in `~/Library/Application Support/com.pen.cleaner/settings.json`. Ignore rules are either
+a **folder** (never scanned or reported by any module) or a single **item** keyed
+`<module>:<id>` (e.g. `updates:/Applications/X.app@2.0` skips one version only). Rules are
+applied in Rust right after each scan and to cached results the moment you add one, so a
+clean can never reach an ignored item. Malware detections can't be ignored.
+
+## Release build
+
+```bash
+scripts/release.sh             # build, sign, verify, self-test, install to /Applications
+scripts/release.sh --dmg       # also produce a .dmg
+```
+
+The build is signed with a stable identity whose SHA-1 lives in `.signing-identity`
+(gitignored; list candidates with `security find-identity -v -p codesigning`). A free Apple
+Development certificate from Xcode works for your own Mac. Stability matters: macOS ties Full
+Disk Access to the signature, so ad-hoc builds would lose it on every rebuild. Sharing the app
+with others needs a Developer ID certificate and notarization instead.
+
+Signed builds run with the hardened runtime. `src-tauri/Entitlements.plist` grants
+`allow-unsigned-executable-memory` because Protection's engine (yara-x → wasmtime) generates
+code at runtime; without it the process is killed ("Code Signature Invalid"). The release
+script's `--self-test` step catches that before installing.
 
 **Full Disk Access:** without it macOS hides Mail, Safari, containers and more. During
 `tauri dev` the app runs inside your terminal, so grant access to the terminal (or IDE).

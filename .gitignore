@@ -3,3 +3,5 @@ dist/
 target/
 .DS_Store
 .idea/
+# Personal code-signing identity (certificate SHA-1); see scripts/release.sh
+.signing-identity

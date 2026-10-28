@@ -330,6 +330,27 @@ struct Job {
 }
 
 impl AppsReport {
+    /// Drops apps you've hidden, ignored leftovers (or their files) and installers.
+    pub fn apply_ignore(&mut self, ig: &crate::settings::Ignore) {
+        if ig.is_empty() {
+            return;
+        }
+        self.apps.retain(|a| !ig.item(&format!("applications:app:{}", a.id)) && !ig.path_str(&a.path));
+        for a in &mut self.apps {
+            a.related.retain(|f| !ig.path_str(&f.path));
+            a.related_size = a.related.iter().map(|f| f.size).sum();
+        }
+        self.leftovers.retain_mut(|l| {
+            if ig.item(&format!("applications:leftover:{}", l.id)) {
+                return false;
+            }
+            l.files.retain(|f| !ig.path_str(&f.path));
+            l.size = l.files.iter().map(|f| f.size).sum();
+            !l.files.is_empty()
+        });
+        self.installers.retain(|i| !ig.path_str(&i.path) && !ig.item(&format!("applications:installer:{}", i.path)));
+    }
+
     fn job(&self, t: &Target) -> Option<Job> {
         let job = |id: &str, name: &str, size, paths: Vec<PathBuf>, error| Job { id: id.into(), name: name.into(), size, paths, error };
         match t {

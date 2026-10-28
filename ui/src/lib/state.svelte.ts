@@ -1,4 +1,4 @@
-import { api, type SystemInfo, type Volume } from "./api";
+import { api, type IgnoreKind, type Settings, type SystemInfo, type Volume } from "./api";
 import type { ModuleId } from "./modules";
 
 export interface Toast {
@@ -16,11 +16,44 @@ class AppState {
   volumes = $state<Volume[]>([]);
   toasts = $state<Toast[]>([]);
   onboardingDismissed = $state(false);
+  settings = $state<Settings>({
+    staleProjectDays: 30,
+    largeFileMb: 50,
+    unusedAppDays: 180,
+    checkUpdatesOnScan: true,
+    onlineNotarization: true,
+    ignore: [],
+  });
 
   async refresh() {
-    const [system, volumes] = await Promise.all([api.systemInfo(), api.volumes()]);
+    const [system, volumes, settings] = await Promise.all([api.systemInfo(), api.volumes(), api.settings.get()]);
     this.system = system;
     this.volumes = volumes;
+    this.settings = settings;
+  }
+
+  async saveSettings(patch: Partial<Settings>) {
+    try {
+      this.settings = await api.settings.save({ ...this.settings, ...patch });
+    } catch (e) {
+      this.toast(`Couldn't save settings: ${e}`, "error");
+    }
+  }
+
+  /** Hides something from future scans (and the current results, which callers prune). */
+  async ignore(kind: IgnoreKind, value: string, label: string, module: string) {
+    try {
+      this.settings = await api.settings.ignore(kind, value, label, module);
+      this.toast(`${label} won't be shown again. Undo it in Settings → Ignore List.`, "success");
+      return true;
+    } catch (e) {
+      this.toast(`Couldn't ignore it: ${e}`, "error");
+      return false;
+    }
+  }
+
+  async unignore(kind: IgnoreKind, value: string) {
+    this.settings = await api.settings.unignore(kind, value);
   }
 
   async refreshVolumes() {

@@ -88,6 +88,12 @@ class Protection {
     }
   }
 
+  /** Marks a flagged background item as known-good. */
+  async trust(id: string, name: string) {
+    if (!(await app.ignore("item", `protection:suspicious:${id}`, name, "protection"))) return;
+    if (this.report) this.report = { ...this.report, suspicious: this.report.suspicious.filter((f) => f.item.id !== id) };
+  }
+
   async cleanPrivacy() {
     const ids = [...this.privacyPicked];
     if (!ids.length) return;

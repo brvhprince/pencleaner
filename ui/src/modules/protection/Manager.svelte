@@ -94,6 +94,7 @@
                 <span class="detail" title={f.program}>{signerLabel(f.signer)} · {f.program}</span>
               </span>
               <button class="reveal shown" title="Show in Finder" onclick={() => api.revealInFinder(f.item.plist ?? f.program)}><ExternalLink size={13} /></button>
+              <button class="act" title="I know this one: don't flag it again" disabled={protection.busy.has(f.item.id)} onclick={() => protection.trust(f.item.id, f.item.name)}>Trust</button>
               <button class="act danger" disabled={protection.busy.has(f.item.id)} onclick={() => protection.removeThreat("suspicious", f.item.id, f.item.name)}>Remove</button>
             </li>
           {/each}

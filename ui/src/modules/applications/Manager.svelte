@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Lock, PackageX, RefreshCw, ScanSearch, Search, ShieldCheck } from "@lucide/svelte";
+  import { ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, EyeOff, Lock, PackageX, RefreshCw, ScanSearch, Search, ShieldCheck } from "@lucide/svelte";
   import { api, type AppEntry, type AppTarget, type AppUpdate, type RelatedFile } from "../../lib/api";
   import AppIcon from "../../lib/components/AppIcon.svelte";
   import Checkbox from "../../lib/components/Checkbox.svelte";
   import FileIcon from "../../lib/components/FileIcon.svelte";
   import { ago, bytes, middleEllipsis, plural } from "../../lib/format";
-  import { SECTIONS, apps, isUnused } from "./apps.svelte";
+  import { SECTIONS, apps, isUnused, unusedDays } from "./apps.svelte";
 
   let query = $state("");
   let filter = $state<"all" | "unused" | "large" | "store">("all");
@@ -134,7 +134,7 @@
             <button class:push={!storeCount} onclick={() => apps.checkUpdates()} disabled={apps.checkingUpdates}><RefreshCw size={11} /> Check Again</button>
           {:else if apps.section === "apps"}
             <div class="chips">
-              {#each [["all", "All"], ["unused", "Unused 6+ months"], ["large", "Over 1 GB"], ["store", "App Store"]] as [id, label] (id)}
+              {#each [["all", "All"], ["unused", `Unused ${unusedDays() >= 365 ? "a year" : `${Math.round(unusedDays() / 30)}+ months`}`], ["large", "Over 1 GB"], ["store", "App Store"]] as [id, label] (id)}
                 <button class:on={filter === id} onclick={() => (filter = id as typeof filter)}>{label}</button>
               {/each}
             </div>
@@ -188,6 +188,7 @@
                     </span>
                     {#if u.size}<span class="size tabular">{bytes(u.size)}</span>{/if}
                   </div>
+                  <button class="skip" title="Hide this version; a newer one will show up again" disabled={apps.installing} onclick={() => apps.skipUpdate(u)}>Skip</button>
                   <button class="act" disabled={apps.installing || !!u.requires || st?.status === "done"} onclick={() => apps.installUpdates([u.id])}>{actionLabel(u)}</button>
                 </div>
                 {#if apps.expanded.has(u.id)}
@@ -258,6 +259,7 @@
                   <span class="age">{l.lastActivity ? `Touched ${ago(l.lastActivity)}` : ""}</span>
                   <span class="size tabular">{bytes(l.size)}</span>
                 </div>
+                <button class="reveal" title="Ignore these leftovers: never show them again" onclick={() => apps.ignoreLeftover(l.id)}><EyeOff size={14} /></button>
                 <button class="reveal shown" title="Show files" onclick={() => toggleOpen(l.id)}>
                   {#if apps.expanded.has(l.id)}<ChevronDown size={15} />{:else}<ChevronRight size={15} />{/if}
                 </button>
@@ -349,6 +351,16 @@
     border-top-color: var(--m-accent);
     animation: spin 0.8s linear infinite;
     vertical-align: -1px;
+  }
+  .skip {
+    flex: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--m-muted);
+    padding: 0 6px;
+  }
+  .skip:hover:not(:disabled) {
+    color: var(--m-text);
   }
   .act {
     flex: none;

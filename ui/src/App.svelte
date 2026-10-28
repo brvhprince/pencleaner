@@ -14,6 +14,7 @@
   import Protection from "./modules/Protection.svelte";
   import Clutter from "./modules/Clutter.svelte";
   import Activity from "./modules/Activity.svelte";
+  import SettingsPage from "./modules/Settings.svelte";
   import SmartCare from "./modules/SmartCare.svelte";
   import SpaceLens from "./modules/SpaceLens.svelte";
   import Tools from "./modules/Tools.svelte";
@@ -24,9 +25,16 @@
   // PenCleaner → About PenCleaner in the menu bar.
   $effect(() => {
     if (!inTauri) return;
-    const off = listen("open-about", () => (showAbout = true));
+    const offs = [
+      listen("open-about", () => (showAbout = true)),
+      listen("open-settings", () => app.go("settings")),
+      // From the menu bar popover.
+      listen<string>("navigate", (e) => {
+        if (e.payload in MODULE) app.go(e.payload as keyof typeof MODULE);
+      }),
+    ];
     return () => {
-      off.then((f) => f());
+      for (const off of offs) off.then((f) => f());
     };
   });
 
@@ -74,6 +82,8 @@
           <SmartCare />
         {:else if app.module === "activity"}
           <Activity />
+        {:else if app.module === "settings"}
+          <SettingsPage />
         {/if}
           {#snippet failed(error, reset)}
             <div class="crash glass" role="alert">

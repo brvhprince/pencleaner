@@ -3,7 +3,7 @@
   import AppIcon from "../../lib/components/AppIcon.svelte";
   import FileIcon from "../../lib/components/FileIcon.svelte";
   import { bytes, plural } from "../../lib/format";
-  import { apps, UNUSED_DAYS } from "./apps.svelte";
+  import { apps, unusedDays } from "./apps.svelte";
 
   const r = $derived(apps.report!);
   const unusedSize = $derived(apps.unused.reduce((s, a) => s + a.size + a.relatedSize, 0));
@@ -46,7 +46,7 @@
 
   <div class="grid">
     <button class="card glass tall" onclick={() => apps.review("apps")}>
-      <h3>{apps.unused.length ? `${plural(apps.unused.length, "app")} you haven't opened in ${UNUSED_DAYS / 30} months` : "Every app is in use"}</h3>
+      <h3>{apps.unused.length ? `${plural(apps.unused.length, "app")} you haven't opened in ${unusedDays() >= 365 ? "a year" : `${Math.round(unusedDays() / 30)} months`}` : "Every app is in use"}</h3>
       <p>
         {apps.unused.length
           ? `Together with their support files they take ${bytes(unusedSize)}.`

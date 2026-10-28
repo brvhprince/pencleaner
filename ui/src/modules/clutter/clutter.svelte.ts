@@ -175,6 +175,24 @@ class Clutter {
     }
   }
 
+  /** Hides a file from future scans and from the results on screen. */
+  async ignore(f: FileInfo) {
+    if (!(await app.ignore("item", `clutter:${f.path}`, f.name, "clutter"))) return;
+    this.selected.delete(f.path);
+    const r = this.report;
+    if (!r) return;
+    const keepFile = (x: FileInfo) => x.path !== f.path;
+    const prune = (sets: FileSet[]) =>
+      sets
+        .map((s) => {
+          const files = s.files.filter(keepFile);
+          const keep = files.some((x) => x.path === s.keep) ? s.keep : (files[0]?.path ?? s.keep);
+          return { ...s, files, keep, reclaimable: files.filter((x) => x.path !== keep).reduce((t, x) => t + x.size, 0) };
+        })
+        .filter((s) => s.files.length > 1);
+    this.report = { ...r, large: r.large.filter(keepFile), downloads: r.downloads.filter(keepFile), duplicates: prune(r.duplicates), similar: prune(r.similar) };
+  }
+
   startOver() {
     this.report = null;
     this.selected.clear();

@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     AppWindow,
+    EyeOff,
     BrainCircuit,
     ChevronLeft,
     File,
@@ -138,6 +139,7 @@
               {#if item.path}
                 <button class="reveal" title="Show in Finder" onclick={() => api.revealInFinder(item.path!)}><ScanSearch size={14} /></button>
               {/if}
+              <button class="reveal" title="Ignore: never show this again" onclick={() => cleanup.ignore(item)}><EyeOff size={14} /></button>
             </li>
           {:else}
             <li class="empty">Nothing matches “{query}”.</li>

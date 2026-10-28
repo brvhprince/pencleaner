@@ -98,6 +98,7 @@ class Cleanup {
 
   setStaleDays(n: number) {
     this.staleDays = n;
+    app.saveSettings({ staleProjectDays: n });
     const projects = this.groups.find((g) => g.id === "projects");
     if (projects) this.applyRecommendations(projects);
   }
@@ -117,6 +118,7 @@ class Cleanup {
 
   /** `quiet`: Smart Care runs this and reports for itself. */
   async scan(quiet = false) {
+    this.staleDays = app.settings.staleProjectDays;
     this.progress = null;
     this.setPhase("scanning");
     try {
@@ -144,6 +146,25 @@ class Cleanup {
   review(groupId: string | null = null) {
     this.focusGroup = groupId ?? this.groups.find((g) => g.items.length)?.id ?? null;
     this.view = "review";
+  }
+
+  /** Drops an ignored item from the results on screen. */
+  forget(id: string) {
+    this.selected.delete(id);
+    if (!this.report) return;
+    this.report = {
+      ...this.report,
+      groups: this.report.groups
+        .map((g) => {
+          const items = g.items.filter((i) => i.id !== id);
+          return { ...g, items, size: items.reduce((s, i) => s + i.size, 0) };
+        })
+        .filter((g) => g.items.length || g.note),
+    };
+  }
+
+  async ignore(item: CleanupItem) {
+    if (await app.ignore("item", `cleanup:${item.id}`, item.name, "cleanup")) this.forget(item.id);
   }
 
   requestClean() {

@@ -5,6 +5,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Runtime};
 
 pub const ABOUT: &str = "about";
+pub const SETTINGS: &str = "settings";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let sep = || PredefinedMenuItem::separator(app);
@@ -14,6 +15,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         true,
         &[
             &MenuItem::with_id(app, ABOUT, "About PenCleaner", true, None::<&str>)?,
+            &sep()?,
+            &MenuItem::with_id(app, SETTINGS, "Settings…", true, Some("CmdOrCtrl+,"))?,
             &sep()?,
             &PredefinedMenuItem::services(app, None)?,
             &sep()?,

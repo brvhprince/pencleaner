@@ -16,9 +16,11 @@ pub mod protection;
 pub mod progress;
 pub mod remove;
 pub mod safety;
+pub mod settings;
 pub mod space_lens;
 pub mod spotlight;
 pub mod updater;
+pub mod vitals;
 pub mod volumes;
 
 pub use error::{Error, Result};

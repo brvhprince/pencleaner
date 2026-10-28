@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronLeft, ScanSearch, Search } from "@lucide/svelte";
+  import { ChevronLeft, EyeOff, ScanSearch, Search } from "@lucide/svelte";
   import { api, fileSrc, type FileInfo, type FileKind, type FileSet } from "../../lib/api";
   import Checkbox from "../../lib/components/Checkbox.svelte";
   import FileIcon from "../../lib/components/FileIcon.svelte";
@@ -81,6 +81,7 @@
       <span class="size tabular">{bytes(f.size)}</span>
     </div>
     <button class="reveal" title="Show in Finder" onclick={() => api.revealInFinder(f.path)}><ScanSearch size={14} /></button>
+    <button class="reveal" title="Ignore: never show this file again" onclick={() => clutter.ignore(f)}><EyeOff size={14} /></button>
   </li>
 {/snippet}
 

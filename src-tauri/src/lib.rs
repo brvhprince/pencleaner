@@ -1,5 +1,6 @@
 mod commands;
 mod menu;
+mod menubar;
 
 use commands::AppState;
 
@@ -16,11 +17,27 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .setup(|app| {
+            menubar::install(app.handle())?;
+            Ok(())
+        })
+        .on_window_event(|win, event| {
+            // Closing the main window keeps PenCleaner in the menu bar; the Dock icon
+            // or the popover's "Open PenCleaner" brings it back.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if win.label() == "main" {
+                    api.prevent_close();
+                    let _ = win.hide();
+                }
+            }
+        })
         .menu(menu::build)
         .on_menu_event(|app, event| {
+            // About and Settings are part of the UI; the window shows them.
             if event.id() == menu::ABOUT {
-                // The About sheet is part of the UI; the window shows it.
                 let _ = tauri::Emitter::emit(app, "open-about", ());
+            } else if event.id() == menu::SETTINGS {
+                let _ = tauri::Emitter::emit(app, "open-settings", ());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -64,7 +81,20 @@ pub fn run() {
             commands::open_privacy_settings,
             commands::watcher_set,
             commands::watcher_clear_alerts,
+            commands::watcher_status,
+            commands::settings_get,
+            commands::settings_save,
+            commands::ignore_add,
+            commands::ignore_remove,
+            commands::vitals,
+            commands::show_main,
+            commands::empty_trash,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running PenCleaner");
+        .build(tauri::generate_context!())
+        .expect("error while building PenCleaner")
+        .run(|app, event| {
+            if let tauri::RunEvent::Reopen { .. } = event {
+                menubar::show_main(app);
+            }
+        });
 }

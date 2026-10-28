@@ -36,7 +36,7 @@ pub struct ProtectionReport {
     pub cancelled: bool,
 }
 
-pub fn scan(ctl: &ScanControl) -> ProtectionReport {
+pub fn scan(ctl: &ScanControl, online_notarization: bool) -> ProtectionReport {
     let started = Instant::now();
     crate::fsutil::set_observer_io_policy();
     let mut errors = Vec::new();
@@ -56,7 +56,7 @@ pub fn scan(ctl: &ScanControl) -> ProtectionReport {
                         Err(err) => (None, 0, vec![], Some(err)),
                     }
                 },
-                persistence::scan,
+                || persistence::scan(online_notarization),
             )
         },
         || rayon::join(privacy::scan, permissions::scan),
@@ -108,6 +108,14 @@ fn trash(path: &Path) -> Result<(), String> {
 }
 
 impl ProtectionReport {
+    /// Drops trusted background items and ignored privacy items. Malware can't be ignored.
+    pub fn apply_ignore(&mut self, ig: &crate::settings::Ignore) {
+        self.suspicious.retain(|f| {
+            !ig.item(&format!("protection:suspicious:{}", f.item.id)) && !f.item.plist.as_deref().is_some_and(|p| ig.path_str(p))
+        });
+        self.privacy.retain(|p| !ig.item(&format!("protection:privacy:{}", p.id)));
+    }
+
     /// Removes a detected threat: first every launch item that would restart it, then the
     /// file or app itself (to the Trash).
     pub fn remove_detection(&mut self, target: &str) -> Result<(), String> {

@@ -20,7 +20,8 @@ pub enum Severity {
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum Signer {
     Apple,
-    Developer { name: String, team: String, notarized: bool },
+    /// `notarized` is None when the (online) check was switched off in Settings.
+    Developer { name: String, team: String, notarized: Option<bool> },
     Homebrew,
     AdHoc,
     Unsigned,
@@ -40,8 +41,9 @@ pub struct Finding {
 
 const INTERPRETERS: &[&str] = &["sh", "bash", "zsh", "dash", "python", "python3", "perl", "ruby", "osascript", "node"];
 
-/// Reads `codesign -dv` and, for developer-signed code, `spctl` for notarization.
-pub fn signer(path: &Path) -> Signer {
+/// Reads `codesign -dv` and, when `online`, asks Apple whether developer-signed code is
+/// notarized (the same lookup Gatekeeper does).
+pub fn signer(path: &Path, online: bool) -> Signer {
     if is_homebrew(path) {
         return Signer::Homebrew;
     }
@@ -63,10 +65,13 @@ pub fn signer(path: &Path) -> Signer {
     let team = field("TeamIdentifier=").filter(|t| t != "not set").unwrap_or_default();
     if authority == "Apple Mac OS Application Signing" {
         // Mac App Store: reviewed and signed by Apple on the developer's behalf.
-        return Signer::Developer { name: "Mac App Store".into(), team, notarized: true };
+        return Signer::Developer { name: "Mac App Store".into(), team, notarized: Some(true) };
     }
     let name = authority.strip_prefix("Developer ID Application: ").unwrap_or(&authority);
     let name = name.rsplit_once(" (").map_or(name, |(n, _)| n).to_owned();
+    if !online {
+        return Signer::Developer { name, team, notarized: None };
+    }
     // Gatekeeper's own test, valid for helpers and tools too (spctl only judges apps).
     let notarized = Command::new("/usr/bin/codesign")
         .args(["--verify", "--check-notarization", "-R=notarized"])
@@ -75,7 +80,7 @@ pub fn signer(path: &Path) -> Signer {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success());
-    Signer::Developer { name, team, notarized }
+    Signer::Developer { name, team, notarized: Some(notarized) }
 }
 
 fn is_homebrew(path: &Path) -> bool {
@@ -124,7 +129,7 @@ pub fn is_our_watcher(item: &LaunchItem) -> bool {
         && item.executable.as_deref().zip(std::env::current_exe().ok()).is_some_and(|(e, me)| same(Path::new(e), &me))
 }
 
-pub fn analyze(item: &LaunchItem) -> Option<Finding> {
+pub fn analyze(item: &LaunchItem, online: bool) -> Option<Finding> {
     let args = item.plist.as_deref().map(|p| program_arguments(Path::new(p))).unwrap_or_default();
     let exe = args.first().cloned().or_else(|| item.executable.clone())?;
     let exe_path = PathBuf::from(&exe);
@@ -152,7 +157,7 @@ pub fn analyze(item: &LaunchItem) -> Option<Finding> {
         }
     }
 
-    let signer = signer(&program);
+    let signer = signer(&program, online);
     if item.id.starts_with("com.apple.") && signer != Signer::Apple {
         flag(Severity::High, "Uses an Apple name but isn't signed by Apple".into(), &mut reasons);
     }
@@ -162,7 +167,7 @@ pub fn analyze(item: &LaunchItem) -> Option<Finding> {
     match &signer {
         Signer::Unsigned => flag(Severity::Medium, "Its program isn't signed by any developer".into(), &mut reasons),
         Signer::AdHoc => flag(Severity::Medium, "Its program is only self-signed (no identified developer)".into(), &mut reasons),
-        Signer::Developer { notarized: false, name, .. } => flag(Severity::Medium, format!("Signed by {name} but not notarized by Apple"), &mut reasons),
+        Signer::Developer { notarized: Some(false), name, .. } => flag(Severity::Medium, format!("Signed by {name} but not notarized by Apple"), &mut reasons),
         _ => {}
     }
 
@@ -171,9 +176,9 @@ pub fn analyze(item: &LaunchItem) -> Option<Finding> {
 
 /// Reads launchd plists directly: fast and dependable (sfltool can hang for minutes),
 /// and plists are what installers and malware plant.
-pub fn scan() -> Vec<Finding> {
+pub fn scan(online: bool) -> Vec<Finding> {
     let none = std::collections::HashSet::new();
-    let mut found: Vec<Finding> = items::from_plists(&none, &none).par_iter().filter(|i| !is_our_watcher(i)).filter_map(analyze).collect();
+    let mut found: Vec<Finding> = items::from_plists(&none, &none).par_iter().filter(|i| !is_our_watcher(i)).filter_map(|i| analyze(i, online)).collect();
     found.sort_by_key(|f| (f.severity, f.item.name.to_lowercase()));
     found
 }
@@ -214,15 +219,15 @@ mod tests {
 
     #[test]
     fn reads_signers() {
-        assert_eq!(signer(Path::new("/usr/bin/curl")), Signer::Apple);
-        assert_eq!(signer(Path::new("/System/Applications/Calculator.app")), Signer::Apple);
+        assert_eq!(signer(Path::new("/usr/bin/curl"), true), Signer::Apple);
+        assert_eq!(signer(Path::new("/System/Applications/Calculator.app"), true), Signer::Apple);
         if Path::new("/Applications/Xcode.app").exists() {
-            assert!(matches!(signer(Path::new("/Applications/Xcode.app")), Signer::Developer { notarized: true, .. }));
+            assert!(matches!(signer(Path::new("/Applications/Xcode.app"), true), Signer::Developer { notarized: Some(true), .. }));
         }
         let dir = tempfile::tempdir().unwrap();
         let s = dir.path().join("x.sh");
         fs::write(&s, "#!/bin/sh\n").unwrap();
-        assert_eq!(signer(&s), Signer::Script);
+        assert_eq!(signer(&s, true), Signer::Script);
     }
 
     #[test]
@@ -250,7 +255,7 @@ mod tests {
             app_name: None,
             broken: false,
         };
-        let f = analyze(&item).expect("flagged");
+        let f = analyze(&item, true).expect("flagged");
         assert_eq!(f.severity, Severity::High);
         assert!(f.reasons.iter().any(|r| r.contains("Downloads or decodes")), "{:?}", f.reasons);
 
@@ -260,7 +265,7 @@ mod tests {
         let mut d = plist::Dictionary::new();
         d.insert("ProgramArguments".into(), plist::Value::Array(vec!["/bin/sh".into(), script.to_string_lossy().into_owned().into()]));
         plist::Value::Dictionary(d).to_file_xml(&plist).unwrap();
-        let f = analyze(&item).expect("flagged");
+        let f = analyze(&item, true).expect("flagged");
         assert!(f.reasons.iter().any(|r| r.contains("Apple name")), "{:?}", f.reasons);
         assert_eq!(f.program, script.to_string_lossy());
     }

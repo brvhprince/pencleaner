@@ -585,6 +585,11 @@ pub fn scan(cache_dir: Option<&Path>, on_step: impl Fn(&str) + Sync) -> UpdatesR
 }
 
 impl UpdatesReport {
+    /// Drops skipped versions ("updates:<id>@<version>"): a newer one shows up again.
+    pub fn apply_ignore(&mut self, ig: &crate::settings::Ignore) {
+        self.updates.retain(|u| !ig.item(&format!("updates:{}@{}", u.id, u.latest)) && !u.app_path.as_deref().is_some_and(|p| ig.path_str(p)));
+    }
+
     /// Installs the chosen updates one at a time and drops the successful ones.
     pub fn install(&mut self, ids: &[String], mut on_event: impl FnMut(UpdateEvent)) -> Vec<String> {
         let mut done = Vec::new();
