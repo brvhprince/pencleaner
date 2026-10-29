@@ -10,6 +10,7 @@ mod types;
 pub use types::*;
 
 use crate::cleanup::{mtime_of, CleanEvent, CleanSummary};
+use crate::program_names::{self, normalize, normalize_publisher, parse_date};
 use crate::fsutil::{self, home_dir};
 use crate::progress::ScanControl;
 use crate::remove::{RemoveMode, Remover};
@@ -62,26 +63,6 @@ fn root_of(id: &str) -> Option<(Root, &str)> {
     }
 }
 
-/// "20240815" → Unix seconds.
-fn parse_date(s: &str) -> Option<i64> {
-    let s = s.trim();
-    if s.len() != 8 || !s.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let (y, m, d): (i64, i64, i64) = (s[..4].parse().ok()?, s[4..6].parse().ok()?, s[6..].parse().ok()?);
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
-        return None;
-    }
-    // Days since 1970-01-01 (civil-from-days, proleptic Gregorian).
-    let y2 = if m <= 2 { y - 1 } else { y };
-    let era = y2.div_euclid(400);
-    let yoe = y2 - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    Some((era * 146_097 + doe - 719_468) * DAY)
-}
-
 fn programs() -> Vec<Program> {
     let mut out: Vec<Program> = Vec::new();
     let mut seen = HashSet::new();
@@ -111,29 +92,6 @@ fn programs() -> Vec<Program> {
         }
     }
     out
-}
-
-/// "Visual Studio Code (User)" → "visual studio code"; "7-Zip 23.01 (x64)" → "7-zip".
-fn normalize(name: &str) -> String {
-    let mut s = name.to_lowercase();
-    if let Some(i) = s.find('(') {
-        s.truncate(i);
-    }
-    let words: Vec<&str> = s.split_whitespace().take_while(|w| !w.chars().next().is_some_and(|c| c.is_ascii_digit())).collect();
-    words.join(" ").trim_matches(|c: char| !c.is_alphanumeric()).to_owned()
-}
-
-/// "Slack Technologies Inc." → "slack technologies"; good enough to compare folder names.
-fn normalize_publisher(p: &str) -> String {
-    let s = normalize(p);
-    let drop = [" inc", " inc.", " llc", " ltd", " ltd.", " corporation", " corp", " corp.", " gmbh", ","];
-    let mut t = s;
-    for d in drop {
-        if let Some(stripped) = t.strip_suffix(d) {
-            t = stripped.trim().to_owned();
-        }
-    }
-    t
 }
 
 /// Data folders: Roaming, Local and LocalLow.
@@ -384,28 +342,9 @@ pub fn scan(ctl: &ScanControl) -> AppsReport {
     AppsReport { apps, leftovers, installers, elapsed_ms: started.elapsed().as_millis() as u64, cancelled: ctl.is_cancelled() }
 }
 
-/// The uninstaller to start: (program, arguments). MSI installs go through msiexec with
-/// /X (uninstall) even when the entry says /I (which would open a "modify" screen).
+/// The uninstaller to start for a program: (program, arguments).
 fn uninstall_command(program: &Program) -> (String, String) {
-    if program.msi && program.key_name.starts_with('{') {
-        return ("msiexec.exe".into(), format!("/X{}", program.key_name));
-    }
-    let cmd = program.uninstall.trim();
-    if let Some(rest) = cmd.strip_prefix('"') {
-        if let Some((exe, args)) = rest.split_once('"') {
-            return (exe.to_owned(), args.trim().to_owned());
-        }
-    }
-    // Unquoted, possibly with spaces in the path: split after ".exe".
-    let lower = cmd.to_ascii_lowercase();
-    if let Some(i) = lower.find(".exe") {
-        let (exe, args) = cmd.split_at(i + 4);
-        return (exe.trim().to_owned(), args.trim().to_owned());
-    }
-    match cmd.split_once(' ') {
-        Some((exe, args)) => (exe.to_owned(), args.to_owned()),
-        None => (cmd.to_owned(), String::new()),
-    }
+    program_names::uninstall_command(&program.uninstall, program.msi.then_some(program.key_name.as_str()))
 }
 
 /// Starts a program the way Explorer would (so a UAC prompt appears if it needs one) and
@@ -517,42 +456,6 @@ impl AppsReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn program(uninstall: &str, msi: bool, key_name: &str) -> Program {
-        Program {
-            root: LOCAL_MACHINE,
-            key: format!(r"{UNINSTALL}\{key_name}"),
-            key_name: key_name.into(),
-            name: "App".into(),
-            version: None,
-            publisher: None,
-            location: None,
-            uninstall: uninstall.into(),
-            msi,
-            size_kb: None,
-            installed: None,
-        }
-    }
-
-    #[test]
-    fn parses_uninstall_commands() {
-        let q = program(r#""C:\Program Files\App\unins000.exe" /SILENT"#, false, "App_is1");
-        assert_eq!(uninstall_command(&q), (r"C:\Program Files\App\unins000.exe".into(), "/SILENT".into()));
-        let unquoted = program(r"C:\Program Files\App Two\uninstall.exe /S", false, "AppTwo");
-        assert_eq!(uninstall_command(&unquoted), (r"C:\Program Files\App Two\uninstall.exe".into(), "/S".into()));
-        let msi = program("MsiExec.exe /I{12345678-1234-1234-1234-123456789ABC}", true, "{12345678-1234-1234-1234-123456789ABC}");
-        assert_eq!(uninstall_command(&msi), ("msiexec.exe".into(), "/X{12345678-1234-1234-1234-123456789ABC}".into()));
-    }
-
-    #[test]
-    fn normalizes_names_and_dates() {
-        assert_eq!(normalize("7-Zip 23.01 (x64)"), "7-zip");
-        assert_eq!(normalize("Visual Studio Code (User)"), "visual studio code");
-        assert_eq!(normalize_publisher("Slack Technologies Inc."), "slack technologies");
-        assert_eq!(parse_date("19700102"), Some(DAY));
-        assert_eq!(parse_date("20240229"), Some(19_782 * DAY));
-        assert_eq!(parse_date("2024-02-29"), None);
-    }
 
     #[test]
     fn lists_installed_programs() {

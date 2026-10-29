@@ -1,0 +1,7 @@
+# One Rust for this project everywhere: your Mac, CI and release builds use the same
+# compiler and the same lint rules, so `scripts/check.sh` passing means CI passes.
+# Bump the version here (and nowhere else) to move to a newer Rust.
+[toolchain]
+channel = "1.99"
+components = ["clippy", "rustfmt", "rust-src"]
+targets = ["x86_64-pc-windows-msvc"]

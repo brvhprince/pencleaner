@@ -96,6 +96,13 @@ Cleanup only acts on item ids from its own last scan report, so the UI can never
 delete an arbitrary path, and anything carrying a warning needs a second confirmation.
 Scans never download iCloud placeholders and never touch access times.
 
+## Before committing
+
+Run `scripts/check.sh`. It runs what CI runs, with the same Rust (pinned in
+`rust-toolchain.toml`): the UI type-check and build, macOS lint and tests, and Windows
+lint plus a build of the Windows test program (via `cargo-xwin`). With Wine installed it
+runs the Windows tests too; otherwise those only run on CI.
+
 ## License
 
 MIT. See [LICENSE](LICENSE). 

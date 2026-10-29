@@ -8,6 +8,7 @@ pub mod cleanup;
 pub mod clutter;
 pub mod error;
 pub mod fsutil;
+pub mod program_names;
 pub mod progress;
 pub mod remove;
 pub mod safety;
