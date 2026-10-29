@@ -45,7 +45,7 @@ fn get_raw(root: Root, key: &str, value: &str, flags: u32) -> Option<Vec<u8>> {
 
 pub fn get_string(root: Root, key: &str, value: &str) -> Option<String> {
     let raw = get_raw(root, key, value, RRF_RT_REG_SZ)?;
-    let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|u| *u != 0).collect();
+    let units: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).take_while(|u| *u != 0).collect();
     Some(String::from_utf16_lossy(&units))
 }
 
