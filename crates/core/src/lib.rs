@@ -20,6 +20,9 @@ pub mod volumes;
 // macOS only: app bundles, launchd, codesign, XProtect, TCC, Time Machine, IOKit.
 #[cfg(target_os = "macos")]
 pub mod applications;
+#[cfg(windows)]
+#[path = "windows/applications.rs"]
+pub mod applications;
 #[cfg(target_os = "macos")]
 pub mod performance;
 #[cfg(target_os = "macos")]

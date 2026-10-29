@@ -211,14 +211,14 @@
   {#if v}
     <div class="grid">
       <div class="card tile">
-        <span class="t"><HardDrive size={15} /> {v.diskName}</span>
+        <span class="t linked"><HardDrive size={15} /> <span class="label" title={v.diskName}>{v.diskName}</span></span>
         <span class="big">{bytes(v.diskFree)}</span>
         <span class="sub">free of {bytes(v.diskTotal)}</span>
         <div class="bar"><div style:width="{100 - (v.diskFree / v.diskTotal) * 100}%"></div></div>
         <button class="link" onclick={() => api.showMain("cleanup")}>Free Up</button>
       </div>
       <div class="card tile">
-        <span class="t"><MemoryStick size={15} /> Memory</span>
+        <span class="t" class:linked={available("performance")}><MemoryStick size={15} /> <span class="label">Memory</span></span>
         <span class="big" class:warn={v.memoryLevel !== "normal"}>{v.memoryPressure}%</span>
         <span class="sub">{pick("pressure", "in use")} · {bytes(v.swapUsed)} {pick("swap", "page file")}</span>
         <div class="bar"><div style:width="{v.memoryPressure}%" class:hot={v.memoryLevel !== "normal"}></div></div>
@@ -252,7 +252,7 @@
         <span class="speed"><ArrowDown size={12} /> {rate(v.netDown)}</span>
       </div>
       <div class="card tile">
-        <span class="t"><Trash size={15} /> {BIN}</span>
+        <span class="t" class:linked={v.trash > 0 && !confirmTrash}><Trash size={15} /> <span class="label">{BIN}</span></span>
         {#if v.trash && confirmTrash}
           <!-- The question needs more room than the corner link has. -->
           <span class="sub warn">{bytes(v.trash)}, can't be undone</span>
@@ -434,6 +434,20 @@
     font-size: 12.5px;
     font-weight: 600;
     margin-bottom: 2px;
+    min-width: 0;
+  }
+  /* Room for the corner link ("Free Up", "Empty"); long names like "Local Disk (C:)" get "…". */
+  .t.linked {
+    padding-right: 52px;
+  }
+  .t .label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .t :global(svg) {
+    flex-shrink: 0;
   }
   .big {
     font-size: 19px;

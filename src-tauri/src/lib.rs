@@ -93,11 +93,8 @@ pub fn run() {
             commands::clutter_scan,
             commands::clutter_cancel,
             commands::clutter_remove,
-            #[cfg(target_os = "macos")]
             commands::apps_scan,
-            #[cfg(target_os = "macos")]
             commands::apps_remove,
-            #[cfg(target_os = "macos")]
             commands::app_icon,
             #[cfg(target_os = "macos")]
             commands::perf_scan,

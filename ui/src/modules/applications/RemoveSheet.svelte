@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Check, CircleAlert, Lock, TriangleAlert } from "@lucide/svelte";
+  import { PLATFORM, pick } from "../../lib/modules";
   import { fade, scale } from "svelte/transition";
   import AppIcon from "../../lib/components/AppIcon.svelte";
   import { bytes, plural } from "../../lib/format";
@@ -30,23 +31,33 @@
       {#if apps.sheet === "confirm"}
         {apps.selectedApps.length ? `Uninstall ${plural(apps.selectedApps.length, "app")}?` : `Remove ${plural(rows.length, "item")}?`}
       {:else if apps.sheet === "working"}
-        Moving to the Trash…
+        {PLATFORM === "windows" ? (apps.selectedApps.length ? "Uninstalling…" : "Moving to the Recycle Bin…") : "Moving to the Trash…"}
       {:else}
         Done
       {/if}
     </h2>
     {#if apps.sheet === "confirm"}
-      <p class="muted">
-        {bytes(total)} goes to the Trash, apps together with their support files, so you can put things back until you empty it.
-      </p>
+      {#if PLATFORM === "windows" && apps.selectedApps.length}
+        <p class="muted">
+          Each app's own uninstaller runs in turn; follow its steps (some ask for administrator access). Once an app is gone, the data it left in
+          AppData goes to the Recycle Bin.
+        </p>
+      {:else}
+        <p class="muted">
+          {bytes(total)} goes to the {pick("Trash", "Recycle Bin")}{pick(", apps together with their support files", "")}, so you can put things back until you empty it.
+        </p>
+      {/if}
       {#if running.length}
         <p class="warn"><TriangleAlert size={14} /> {running.map((r) => r.name).join(", ")} {running.length === 1 ? "is" : "are"} running and will be skipped. Quit {running.length === 1 ? "it" : "them"} first to uninstall.</p>
       {/if}
-      {#if needsPassword}
+      {#if needsPassword && PLATFORM === "macos"}
         <p class="note"><Lock size={13} /> Some items were installed for all users. macOS will ask for your password once.</p>
       {/if}
     {:else if apps.sheet === "done" && apps.result}
-      <p class="muted">{plural(apps.result.cleaned.length, "item")} removed, {bytes(apps.result.bytesFreed)} moved to the Trash.</p>
+      <p class="muted">
+        {plural(apps.result.cleaned.length, "item")} removed, {bytes(apps.result.bytesFreed)}
+        {pick("moved to the Trash", "freed (leftover data sits in the Recycle Bin)")}.
+      </p>
     {/if}
 
     <ul>
@@ -67,7 +78,9 @@
     <div class="actions">
       {#if apps.sheet === "confirm"}
         <button class="btn lg" onclick={close}>Cancel</button>
-        <button class="btn lg accent" onclick={() => apps.remove()}>Move to Trash</button>
+        <button class="btn lg accent" onclick={() => apps.remove()}>
+          {PLATFORM === "windows" ? (apps.selectedApps.length ? "Uninstall" : "Move to Recycle Bin") : "Move to Trash"}
+        </button>
       {:else if apps.sheet === "done"}
         <button class="btn lg primary" onclick={close}>Done</button>
       {/if}

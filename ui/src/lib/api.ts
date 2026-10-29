@@ -186,6 +186,9 @@ export interface AppEntry {
   relatedSize: number;
   lastUsed: number | null;
   appStore: boolean;
+  /** Windows: who made it, and when it was installed (no reliable "last opened" there). */
+  publisher: string | null;
+  installed: number | null;
   running: boolean;
   sharesSupportFiles: boolean;
 }

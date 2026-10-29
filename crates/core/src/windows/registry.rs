@@ -1,12 +1,12 @@
 //! Small wrappers over the Windows registry (current user and local machine).
 
 use windows_sys::Win32::System::Registry::{
-    RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_SZ, RRF_RT_REG_BINARY,
-    RRF_RT_REG_SZ,
+    RegCloseKey, RegDeleteKeyValueW, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW, RegSetKeyValueW, HKEY, HKEY_CURRENT_USER,
+    HKEY_LOCAL_MACHINE, KEY_READ, REG_SZ, RRF_RT_DWORD, RRF_RT_REG_BINARY, RRF_RT_REG_SZ,
 };
 
 /// Which hive: the user's own settings or the machine's.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Root {
     CurrentUser,
     LocalMachine,
@@ -43,10 +43,51 @@ fn get_raw(root: Root, key: &str, value: &str, flags: u32) -> Option<Vec<u8>> {
     })
 }
 
+/// A text value. REG_EXPAND_SZ values come back expanded: RegGetValueW does that when
+/// asked for REG_SZ (asking for REG_EXPAND_SZ itself would be an invalid request).
 pub fn get_string(root: Root, key: &str, value: &str) -> Option<String> {
     let raw = get_raw(root, key, value, RRF_RT_REG_SZ)?;
     let units: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).take_while(|u| *u != 0).collect();
     Some(String::from_utf16_lossy(&units))
+}
+
+pub fn get_dword(root: Root, key: &str, value: &str) -> Option<u32> {
+    let raw = get_raw(root, key, value, RRF_RT_DWORD)?;
+    raw.get(..4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+/// Names of a key's direct subkeys (empty if it can't be opened).
+pub fn subkeys(root: Root, key: &str) -> Vec<String> {
+    let k = wide(key);
+    let mut h: HKEY = std::ptr::null_mut();
+    if unsafe { RegOpenKeyExW(root.hkey(), k.as_ptr(), 0, KEY_READ, &mut h) } != 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut buf = [0u16; 256];
+    for i in 0.. {
+        let mut len = buf.len() as u32;
+        let r = unsafe {
+            RegEnumKeyExW(h, i, buf.as_mut_ptr(), &mut len, std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
+        };
+        if r != 0 {
+            break; // ERROR_NO_MORE_ITEMS, or a name over 255 chars (not a valid key name)
+        }
+        out.push(String::from_utf16_lossy(&buf[..len as usize]));
+    }
+    unsafe { RegCloseKey(h) };
+    out
+}
+
+/// Whether a key exists (and can be read).
+pub fn exists(root: Root, key: &str) -> bool {
+    let k = wide(key);
+    let mut h: HKEY = std::ptr::null_mut();
+    let ok = unsafe { RegOpenKeyExW(root.hkey(), k.as_ptr(), 0, KEY_READ, &mut h) } == 0;
+    if ok {
+        unsafe { RegCloseKey(h) };
+    }
+    ok
 }
 
 pub fn get_binary(root: Root, key: &str, value: &str) -> Option<Vec<u8>> {

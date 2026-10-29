@@ -2,7 +2,6 @@
 
 use super::*;
 use std::collections::HashMap;
-use pencleaner_core::applications::{self, AppsReport, Target};
 use pencleaner_core::performance::{self, items::LaunchItem, memory, PerfReport, TaskResult};
 use pencleaner_core::protection::{self, permissions as app_permissions, privacy, watch, ProtectionReport};
 use pencleaner_core::updater::{self, UpdateEvent, UpdatesReport};
@@ -10,61 +9,6 @@ use pencleaner_core::updater::{self, UpdateEvent, UpdatesReport};
 #[tauri::command]
 pub fn open_full_disk_access_settings() -> CmdResult<()> {
     open(&[permissions::FULL_DISK_ACCESS_SETTINGS])
-}
-
-#[tauri::command]
-pub async fn apps_scan(app: AppHandle, on_progress: Channel<Progress>) -> CmdResult<AppsReport> {
-    let ctl = Arc::new(ScanControl::new());
-    let done = stream_progress(ctl.clone(), on_progress);
-    let result = tauri::async_runtime::spawn_blocking(move || applications::scan(&ctl))
-        .await
-        .map_err(|e| e.to_string());
-    done.store(true, Ordering::Relaxed);
-    let mut report = result?;
-    report.apply_ignore(&load_settings().matcher());
-    *app.state::<AppState>().apps.write() = Some(report.clone());
-    Ok(report)
-}
-
-/// Uninstalls apps / removes leftovers and installers from the last report, by id.
-#[tauri::command]
-pub async fn apps_remove(
-    app: AppHandle,
-    targets: Vec<Target>,
-    on_event: Channel<CleanEvent>,
-) -> CmdResult<CleanSummary> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let mut guard = state.apps.write();
-        let report = guard.as_mut().ok_or("Scan again before removing apps")?;
-        let apps = targets.iter().filter(|t| matches!(t, Target::App(_))).count();
-        let summary = report.remove(&targets, |ev| {
-            let _ = on_event.send(ev);
-        });
-        let action = if apps > 0 { "Uninstalled apps" } else { "Removed app leftovers" };
-        record(&app, "applications", action, summary.bytes_freed, summary.cleaned.len(), None);
-        Ok(summary)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// An app's icon as a PNG data URL (cached), or null when it has none we can read.
-#[tauri::command]
-pub async fn app_icon(app: AppHandle, path: String) -> CmdResult<Option<String>> {
-    use base64::Engine;
-    if let Some(hit) = app.state::<AppState>().icons.lock().get(&path) {
-        return Ok(hit.clone());
-    }
-    let key = path.clone();
-    let url = tauri::async_runtime::spawn_blocking(move || {
-        pencleaner_core::imaging::app_icon_png(Path::new(&path), 96)
-            .map(|png| format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    app.state::<AppState>().icons.lock().insert(key, url.clone());
-    Ok(url)
 }
 
 #[tauri::command]

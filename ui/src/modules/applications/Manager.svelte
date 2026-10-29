@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, EyeOff, Lock, PackageX, RefreshCw, ScanSearch, Search, ShieldCheck } from "@lucide/svelte";
+  import { PLATFORM, pick } from "../../lib/modules";
   import { api, type AppEntry, type AppTarget, type AppUpdate, type RelatedFile } from "../../lib/api";
   import AppIcon from "../../lib/components/AppIcon.svelte";
   import Checkbox from "../../lib/components/Checkbox.svelte";
@@ -81,7 +82,7 @@
         <span class="fpath" title={f.path}>{middleEllipsis(f.path, 80)}</span>
         {#if f.admin}<span class="lock" title="Needs your administrator password"><Lock size={12} /></span>{/if}
         <span class="fsize tabular">{bytes(f.size)}</span>
-        <button class="reveal" title="Show in Finder" onclick={() => api.revealInFinder(f.path)}><ScanSearch size={13} /></button>
+        <button class="reveal" title={pick("Show in Finder", "Show in Explorer")} onclick={() => api.revealInFinder(f.path)}><ScanSearch size={13} /></button>
       </li>
     {/each}
   </ul>
@@ -134,7 +135,7 @@
             <button class:push={!storeCount} onclick={() => apps.checkUpdates()} disabled={apps.checkingUpdates}><RefreshCw size={11} /> Check Again</button>
           {:else if apps.section === "apps"}
             <div class="chips">
-              {#each [["all", "All"], ["unused", `Unused ${unusedDays() >= 365 ? "a year" : `${Math.round(unusedDays() / 30)}+ months`}`], ["large", "Over 1 GB"], ["store", "App Store"]] as [id, label] (id)}
+              {#each PLATFORM === "windows" ? [["all", "All"], ["large", "Over 1 GB"]] : [["all", "All"], ["unused", `Unused ${unusedDays() >= 365 ? "a year" : `${Math.round(unusedDays() / 30)}+ months`}`], ["large", "Over 1 GB"], ["store", "App Store"]] as [id, label] (id)}
                 <button class:on={filter === id} onclick={() => (filter = id as typeof filter)}>{label}</button>
               {/each}
             </div>
@@ -225,11 +226,15 @@
                       {#if a.running}<em class="tag live">Running</em>{/if}
                     </span>
                     <span class="detail">
-                      {a.lastUsed ? `Opened ${ago(a.lastUsed)}` : "Never opened"} ·
+                      {#if PLATFORM === "windows"}
+                        {[a.publisher, a.installed ? `installed ${ago(a.installed)}` : null].filter(Boolean).join(" · ") || "Installed"} ·
+                      {:else}
+                        {a.lastUsed ? `Opened ${ago(a.lastUsed)}` : "Never opened"} ·
+                      {/if}
                       {#if a.sharesSupportFiles}
                         another copy is installed, so its support files stay
                       {:else}
-                        {bytes(a.size)} app + {bytes(a.relatedSize)} in {plural(a.related.length, "support file")}
+                        {bytes(a.size)} app + {bytes(a.relatedSize)} in {plural(a.related.length, pick("support file", "data folder"))}
                       {/if}
                     </span>
                   </span>
@@ -283,7 +288,7 @@
                 <span class="age">{i.added ? `Added ${ago(i.added)}` : ""}</span>
                 <span class="size tabular">{bytes(i.size)}</span>
               </div>
-              <button class="reveal" title="Show in Finder" onclick={() => api.revealInFinder(i.path)}><ScanSearch size={14} /></button>
+              <button class="reveal" title={pick("Show in Finder", "Show in Explorer")} onclick={() => api.revealInFinder(i.path)}><ScanSearch size={14} /></button>
             </li>
           {:else}
             <li class="empty">No installer files found.</li>

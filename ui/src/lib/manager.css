@@ -87,6 +87,12 @@
     outline: 0;
   }
 
+/* The review panels are light: a light open list to match (see app.css). */
+.manager select option {
+    background-color: #fff;
+    color: var(--m-text);
+  }
+
 .manager .body {
     flex: 1;
     min-height: 0;

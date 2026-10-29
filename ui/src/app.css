@@ -143,3 +143,11 @@ p {
     transition-duration: 1ms !important;
   }
 }
+
+/* Windows draws a <select>'s open list itself, from each option's own colours; inherited
+   white text on its default white list was invisible until hovered. macOS ignores these. */
+select option {
+  background-color: #2a2438;
+  color: #f4f1fa;
+}
+

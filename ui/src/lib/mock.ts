@@ -179,6 +179,9 @@ function app(name: string, id: string, appMb: number, usedDays: number | null, r
     relatedSize: related.reduce((s, f) => s + f.size, 0),
     lastUsed: usedDays === null ? null : days(usedDays),
     appStore: false,
+    // Windows previews: who made it and when it went in (no "last opened" there).
+    publisher: location.hash.includes("platform=windows") ? `${name.split(" ")[0]} Inc.` : null,
+    installed: location.hash.includes("platform=windows") ? days(usedDays ?? 400) : null,
     running: false,
     ...extra,
   };
@@ -688,7 +691,7 @@ export const mock = {
     const j = () => Math.random();
     return {
       model: "MacBook Pro",
-      diskName: "WANPEN",
+      diskName: location.hash.includes("platform=windows") ? "Local Disk (C:)" : "WANPEN",
       diskFree: 312.6 * GB,
       diskTotal: 1000.2 * GB,
       memoryPressure: 36 + Math.round(j() * 4),

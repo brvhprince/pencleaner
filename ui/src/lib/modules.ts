@@ -82,7 +82,7 @@ export const PLATFORM: Platform =
   /Windows/.test(navigator.userAgent) || location.hash.includes("platform=windows") ? "windows" : "macos";
 
 /** Modules whose engine is macOS-only so far. */
-const MAC_ONLY: ModuleId[] = ["protection", "performance", "applications"];
+const MAC_ONLY: ModuleId[] = ["protection", "performance"];
 
 /** The macOS or the Windows wording/value. */
 export const pick = <T>(mac: T, win: T): T => (PLATFORM === "windows" ? win : mac);

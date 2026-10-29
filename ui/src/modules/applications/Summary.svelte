@@ -1,5 +1,6 @@
 <script lang="ts">
   import { RefreshCw, RotateCcw } from "@lucide/svelte";
+  import { MACHINE, PLATFORM, pick } from "../../lib/modules";
   import AppIcon from "../../lib/components/AppIcon.svelte";
   import FileIcon from "../../lib/components/FileIcon.svelte";
   import { bytes, plural } from "../../lib/format";
@@ -7,6 +8,7 @@
 
   const r = $derived(apps.report!);
   const unusedSize = $derived(apps.unused.reduce((s, a) => s + a.size + a.relatedSize, 0));
+  const totalSize = $derived(r.apps.reduce((s, a) => s + a.size + a.relatedSize, 0));
   const leftoverSize = $derived(r.leftovers.reduce((s, l) => s + l.size, 0));
   const installerSize = $derived(r.installers.reduce((s, i) => s + i.size, 0));
   const heaviest = $derived([...r.apps].sort((a, b) => b.relatedSize - a.relatedSize)[0]);
@@ -40,18 +42,24 @@
   </div>
 
   <header>
-    <h1>We've found {plural(r.apps.length, "app")} on your Mac.</h1>
+    <h1>We've found {plural(r.apps.length, "app")} on your {MACHINE}.</h1>
     <button class="btn lg" onclick={() => apps.review("apps")}>Manage My Applications</button>
   </header>
 
   <div class="grid">
     <button class="card glass tall" onclick={() => apps.review("apps")}>
-      <h3>{apps.unused.length ? `${plural(apps.unused.length, "app")} you haven't opened in ${unusedDays() >= 365 ? "a year" : `${Math.round(unusedDays() / 30)} months`}` : "Every app is in use"}</h3>
-      <p>
-        {apps.unused.length
-          ? `Together with their support files they take ${bytes(unusedSize)}.`
-          : "Nothing has gone unopened for half a year. Browse the list to uninstall anything else."}
-      </p>
+      {#if PLATFORM === "windows"}
+        <!-- Windows keeps no reliable "last opened" record, so no "unused" claim here. -->
+        <h3>{plural(r.apps.length, "app")} installed</h3>
+        <p>Together with their data they take {bytes(totalSize)}. Browse the list to uninstall what you don't use.</p>
+      {:else}
+        <h3>{apps.unused.length ? `${plural(apps.unused.length, "app")} you haven't opened in ${unusedDays() >= 365 ? "a year" : `${Math.round(unusedDays() / 30)} months`}` : "Every app is in use"}</h3>
+        <p>
+          {apps.unused.length
+            ? `Together with their support files they take ${bytes(unusedSize)}.`
+            : "Nothing has gone unopened for half a year. Browse the list to uninstall anything else."}
+        </p>
+      {/if}
       <div class="icons">
         {#each showcase as a, i (a.id)}<span style:--i={i}><AppIcon path={a.path} size={i === 1 ? 84 : 60} /></span>{/each}
       </div>
@@ -59,6 +67,7 @@
     </button>
 
     <div class="card glass split">
+      {#if PLATFORM === "macos"}
       <div>
         <div class="head"><span class="badge"><RefreshCw size={15} /></span><h3>{updatesTitle}</h3></div>
         <p>{updatesText}</p>
@@ -71,6 +80,7 @@
           </div>
         {/if}
       </div>
+      {/if}
       <div>
         <h3>{r.leftovers.length ? `${bytes(leftoverSize)} of App Leftovers` : "No App Leftovers"}</h3>
         <p>{r.leftovers.length ? `Support files from ${plural(r.leftovers.length, "app")} that ${r.leftovers.length === 1 ? "is" : "are"} no longer installed.` : "Removed apps left nothing behind."}</p>
@@ -86,13 +96,17 @@
     <div class="card glass split">
       <div>
         <div class="head"><FileIcon kind="installer" size={30} /><h3>{r.installers.length ? `${bytes(installerSize)} of Installers` : "No Installers"}</h3></div>
-        <p>{r.installers.length ? `${plural(r.installers.length, "disk image or package", "disk images and packages")} you no longer need.` : "No .dmg or .pkg files lying around."}</p>
+        <p>
+          {r.installers.length
+            ? `${plural(r.installers.length, pick("disk image or package", "installer"), pick("disk images and packages", "installers"))} you no longer need.`
+            : pick("No .dmg or .pkg files lying around.", "No .exe, .msi or .iso installers lying around.")}
+        </p>
         {#if r.installers.length}<button class="btn" onclick={() => apps.review("installers")}>Review</button>{/if}
       </div>
       {#if heaviest && heaviest.relatedSize > 0}
         <div>
           <div class="head"><AppIcon path={heaviest.path} size={30} /><h3>{heaviest.name} keeps {bytes(heaviest.relatedSize)}</h3></div>
-          <p>in support files, the most of any app. Uninstalling removes them too.</p>
+          <p>in {pick("support files", "app data")}, the most of any app. Uninstalling removes {pick("them", "it")} too.</p>
           <button class="btn" onclick={() => { apps.expanded.add(heaviest.id); apps.review("apps"); }}>Show</button>
         </div>
       {/if}

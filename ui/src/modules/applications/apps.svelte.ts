@@ -1,5 +1,6 @@
 // Applications state, at module scope so results survive switching modules.
 import type { Component } from "svelte";
+import { PLATFORM, pick } from "../../lib/modules";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { AppWindow, Download, PackageX, RefreshCw } from "@lucide/svelte";
 import { api, type AppEntry, type AppTarget, type AppUpdate, type AppsReport, type CleanSummary, type Progress, type UpdatesReport } from "../../lib/api";
@@ -9,10 +10,27 @@ import { app } from "../../lib/state.svelte";
 export type Section = "apps" | "updates" | "leftovers" | "installers";
 
 export const SECTIONS: { id: Section; title: string; blurb: string; icon: Component }[] = [
-  { id: "apps", title: "Uninstaller", blurb: "Remove apps together with the support files, caches and helpers they scattered around.", icon: AppWindow },
-  { id: "updates", title: "Updater", blurb: "Newer versions from the App Store, the apps' own update feeds and Homebrew.", icon: RefreshCw },
+  {
+    id: "apps",
+    title: "Uninstaller",
+    blurb: pick(
+      "Remove apps together with the support files, caches and helpers they scattered around.",
+      "Run each app's own uninstaller, then clear the data it left in AppData.",
+    ),
+    icon: AppWindow,
+  },
+  // The Windows updater (winget) is still to come.
+  ...pick<{ id: Section; title: string; blurb: string; icon: Component }[]>(
+    [{ id: "updates", title: "Updater", blurb: "Newer versions from the App Store, the apps' own update feeds and Homebrew.", icon: RefreshCw }],
+    [],
+  ),
   { id: "leftovers", title: "Leftovers", blurb: "Files left behind by apps that are already gone.", icon: PackageX },
-  { id: "installers", title: "Installation Files", blurb: "Disk images and installer packages that have done their job.", icon: Download },
+  {
+    id: "installers",
+    title: "Installation Files",
+    blurb: pick("Disk images and installer packages that have done their job.", "Setup programs and installer packages that have done their job."),
+    icon: Download,
+  },
 ];
 
 const DAY = 86400;
@@ -139,7 +157,7 @@ class Apps {
   async scan() {
     this.progress = null;
     this.setPhase("scanning");
-    if (app.settings.checkUpdatesOnScan) void this.checkUpdates();
+    if (app.settings.checkUpdatesOnScan && PLATFORM === "macos") void this.checkUpdates();
     try {
       this.report = await api.apps.scan((p) => (this.progress = p));
       this.selected.clear();
@@ -213,7 +231,12 @@ class Apps {
       for (const g of gone) this.selected.delete(g);
       this.sheet = "done";
       if (this.result.cleaned.length) {
-        app.toast(`Moved ${plural(this.result.cleaned.length, "item")} (${bytes(this.result.bytesFreed)}) to the Trash. Empty it to free the space.`, "success");
+        app.toast(
+          PLATFORM === "windows"
+            ? `Removed ${plural(this.result.cleaned.length, "item")}, ${bytes(this.result.bytesFreed)} freed. Leftover data sits in the Recycle Bin until you empty it.`
+            : `Moved ${plural(this.result.cleaned.length, "item")} (${bytes(this.result.bytesFreed)}) to the Trash. Empty it to free the space.`,
+          "success",
+        );
       }
       app.refreshVolumes();
     } catch (e) {

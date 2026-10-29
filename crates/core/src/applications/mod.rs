@@ -3,6 +3,8 @@
 //! installer images that have done their job.
 
 mod matching;
+mod types;
+pub use types::*;
 
 use crate::apps::{self, AppInfo};
 use crate::cleanup::{CleanEvent, CleanSummary};
@@ -14,7 +16,7 @@ use crate::safety;
 use crate::spotlight;
 use matching::{LibEntry, Universe};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::CString;
 use std::fs;
@@ -23,78 +25,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const DAY: i64 = 86_400;
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RelatedFile {
-    pub path: String,
-    /// Where it lives, e.g. "Preferences", "Launch Daemon".
-    pub label: &'static str,
-    pub size: u64,
-    /// Needs the administrator password to remove.
-    pub admin: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppEntry {
-    /// The bundle path: unique even when two copies share a bundle id
-    /// (e.g. IDLE.app in two Python versions).
-    pub id: String,
-    pub bundle_id: String,
-    pub name: String,
-    pub version: Option<String>,
-    pub path: String,
-    pub size: u64,
-    pub related: Vec<RelatedFile>,
-    pub related_size: u64,
-    pub last_used: Option<i64>,
-    pub app_store: bool,
-    pub running: bool,
-    /// Another installed copy shares this bundle id, so its support files stay put.
-    pub shares_support_files: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Leftover {
-    pub id: String,
-    /// The same vendor still has apps installed; these may be shared, so check first.
-    pub vendor_installed: bool,
-    pub files: Vec<RelatedFile>,
-    pub size: u64,
-    pub last_activity: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Installer {
-    pub path: String,
-    pub name: String,
-    pub size: u64,
-    pub added: Option<i64>,
-    /// An installed app this image appears to be for.
-    pub installed_app: Option<String>,
-    pub recommended: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppsReport {
-    pub apps: Vec<AppEntry>,
-    pub leftovers: Vec<Leftover>,
-    pub installers: Vec<Installer>,
-    pub elapsed_ms: u64,
-    pub cancelled: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind", content = "id")]
-pub enum Target {
-    App(String),
-    Leftover(String),
-    Installer(String),
-}
 
 fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
@@ -228,6 +158,8 @@ pub fn scan(ctl: &ScanControl) -> AppsReport {
                 related,
                 last_used: spotlight::meta(&a.path).last_used,
                 app_store: a.path.join("Contents/_MASReceipt").exists(),
+                publisher: None,
+                installed: None,
                 running: running.contains(&a.bundle_id.to_ascii_lowercase()),
                 shares_support_files: shared,
             }
@@ -383,27 +315,6 @@ struct Job {
 }
 
 impl AppsReport {
-    /// Drops apps you've hidden, ignored leftovers (or their files) and installers.
-    pub fn apply_ignore(&mut self, ig: &crate::settings::Ignore) {
-        if ig.is_empty() {
-            return;
-        }
-        self.apps.retain(|a| !ig.item(&format!("applications:app:{}", a.id)) && !ig.path_str(&a.path));
-        for a in &mut self.apps {
-            a.related.retain(|f| !ig.path_str(&f.path));
-            a.related_size = a.related.iter().map(|f| f.size).sum();
-        }
-        self.leftovers.retain_mut(|l| {
-            if ig.item(&format!("applications:leftover:{}", l.id)) {
-                return false;
-            }
-            l.files.retain(|f| !ig.path_str(&f.path));
-            l.size = l.files.iter().map(|f| f.size).sum();
-            !l.files.is_empty()
-        });
-        self.installers.retain(|i| !ig.path_str(&i.path) && !ig.item(&format!("applications:installer:{}", i.path)));
-    }
-
     fn job(&self, t: &Target) -> Option<Job> {
         let job = |id: &str, name: &str, size, paths: Vec<PathBuf>, error| Job { id: id.into(), name: name.into(), size, paths, error };
         match t {

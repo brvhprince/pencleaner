@@ -4,6 +4,7 @@
 use parking_lot::{Mutex, RwLock};
 use pencleaner_core::cleanup::{self, Category, CleanEvent, CleanSummary, Report};
 use pencleaner_core::activity::{self, Event};
+use pencleaner_core::applications::{self, AppsReport, Target};
 use pencleaner_core::clutter::{self, ClutterReport};
 use pencleaner_core::settings::{self as user_settings, IgnoreKind, Settings};
 use pencleaner_core::progress::{Progress, ScanControl};
@@ -57,9 +58,7 @@ pub struct AppState {
     pub(crate) cleanup_ctl: Mutex<Option<Arc<ScanControl>>>,
     clutter: RwLock<Option<ClutterReport>>,
     clutter_ctl: Mutex<Option<Arc<ScanControl>>>,
-    #[cfg(target_os = "macos")]
-    apps: RwLock<Option<pencleaner_core::applications::AppsReport>>,
-    #[cfg(target_os = "macos")]
+    apps: RwLock<Option<AppsReport>>,
     icons: Mutex<std::collections::HashMap<String, Option<String>>>,
     #[cfg(target_os = "macos")]
     perf: RwLock<Option<pencleaner_core::performance::PerfReport>>,
@@ -400,11 +399,11 @@ fn apply_ignore_to_cached(app: &AppHandle, s: &Settings) {
     if let Some(r) = state.clutter.write().as_mut() {
         r.apply_ignore(&ig);
     };
+    if let Some(r) = state.apps.write().as_mut() {
+        r.apply_ignore(&ig);
+    };
     #[cfg(target_os = "macos")]
     {
-        if let Some(r) = state.apps.write().as_mut() {
-            r.apply_ignore(&ig);
-        }
         if let Some(r) = state.updates.write().as_mut() {
             r.apply_ignore(&ig);
         }
@@ -548,3 +547,57 @@ pub fn open_system_tool(tool: pencleaner_core::cleanup::Tool) -> CmdResult<()> {
     }
 }
 
+#[tauri::command]
+pub async fn apps_scan(app: AppHandle, on_progress: Channel<Progress>) -> CmdResult<AppsReport> {
+    let ctl = Arc::new(ScanControl::new());
+    let done = stream_progress(ctl.clone(), on_progress);
+    let result = tauri::async_runtime::spawn_blocking(move || applications::scan(&ctl))
+        .await
+        .map_err(|e| e.to_string());
+    done.store(true, Ordering::Relaxed);
+    let mut report = result?;
+    report.apply_ignore(&load_settings().matcher());
+    *app.state::<AppState>().apps.write() = Some(report.clone());
+    Ok(report)
+}
+
+/// Uninstalls apps / removes leftovers and installers from the last report, by id.
+#[tauri::command]
+pub async fn apps_remove(
+    app: AppHandle,
+    targets: Vec<Target>,
+    on_event: Channel<CleanEvent>,
+) -> CmdResult<CleanSummary> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut guard = state.apps.write();
+        let report = guard.as_mut().ok_or("Scan again before removing apps")?;
+        let apps = targets.iter().filter(|t| matches!(t, Target::App(_))).count();
+        let summary = report.remove(&targets, |ev| {
+            let _ = on_event.send(ev);
+        });
+        let action = if apps > 0 { "Uninstalled apps" } else { "Removed app leftovers" };
+        record(&app, "applications", action, summary.bytes_freed, summary.cleaned.len(), None);
+        Ok(summary)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// An app's icon as a PNG data URL (cached), or null when it has none we can read.
+#[tauri::command]
+pub async fn app_icon(app: AppHandle, path: String) -> CmdResult<Option<String>> {
+    use base64::Engine;
+    if let Some(hit) = app.state::<AppState>().icons.lock().get(&path) {
+        return Ok(hit.clone());
+    }
+    let key = path.clone();
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        pencleaner_core::imaging::app_icon_png(Path::new(&path), 96)
+            .map(|png| format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    app.state::<AppState>().icons.lock().insert(key, url.clone());
+    Ok(url)
+}
