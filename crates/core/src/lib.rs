@@ -12,7 +12,9 @@ pub mod progress;
 pub mod remove;
 pub mod safety;
 pub mod settings;
+pub mod sensors;
 pub mod space_lens;
+pub mod vitals;
 pub mod volumes;
 
 // macOS only: app bundles, launchd, codesign, XProtect, TCC, Time Machine, IOKit.
@@ -25,13 +27,17 @@ pub mod privileged;
 #[cfg(target_os = "macos")]
 pub mod protection;
 #[cfg(target_os = "macos")]
-pub mod sensors;
-#[cfg(target_os = "macos")]
 pub mod updater;
-#[cfg(target_os = "macos")]
-pub mod vitals;
 
 // Used by shared code; Windows has stand-ins with the same names (src/windows/).
+/// Windows-only helpers (the registry).
+#[cfg(windows)]
+pub mod windows {
+    pub mod elevate;
+    pub mod recycle_bin;
+    pub mod registry;
+}
+
 #[cfg(target_os = "macos")]
 pub mod apps;
 #[cfg(windows)]

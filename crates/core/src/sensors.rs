@@ -16,7 +16,7 @@ pub struct Sensors {
     pub fan_max_rpm: Option<u32>,
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 mod smc {
     use std::ffi::{c_char, c_void};
 
@@ -161,10 +161,10 @@ mod smc {
 }
 
 /// CPU temperature keys, most representative first: package/die, then proximity.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 const CPU_KEYS: [&str; 5] = ["TC0F", "TC0D", "TC0E", "TCXC", "TC0P"];
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 pub fn read() -> Option<Sensors> {
     let smc = smc::Smc::open()?;
     let plausible = |c: &f32| (5.0..125.0).contains(c);
@@ -183,13 +183,13 @@ pub fn read() -> Option<Sensors> {
 }
 
 /// Every CPU key and its value, for checking which sensor a Mac has.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 pub fn cpu_keys() -> Vec<(&'static str, Option<f32>)> {
     let Some(smc) = smc::Smc::open() else { return vec![] };
     CPU_KEYS.iter().map(|k| (*k, smc.number(k))).collect()
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
 pub fn read() -> Option<Sensors> {
     None
 }

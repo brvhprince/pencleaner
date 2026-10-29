@@ -205,6 +205,7 @@ pub fn projects(cx: &Cx) -> Vec<Group> {
                 last_activity: last,
                 recommended: stale,
                 warning: None,
+                admin: false,
                 action: Action::Paths(artifacts),
             })
         })
@@ -307,6 +308,7 @@ pub fn simulators(cx: &Cx) -> Vec<Group> {
                 last_activity: mtime_of(&dir),
                 recommended: !d.is_available,
                 warning: booted.then(|| "This simulator is running.".into()),
+                admin: false,
                 action: Action::Command(vec!["/usr/bin/xcrun".into(), "simctl".into(), "delete".into(), d.udid]),
             });
         }
@@ -437,6 +439,7 @@ pub fn ide_caches(cx: &Cx) -> Vec<Group> {
             last_activity: None,
             recommended: !running,
             warning: running.then(|| format!("{name} is running. Quit it first.")),
+            admin: false,
             action: Action::Paths(parts),
         });
     }

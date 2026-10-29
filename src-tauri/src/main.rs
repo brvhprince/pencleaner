@@ -19,5 +19,10 @@ fn main() {
             return;
         }
     }
+    // The elevated copy started for system cleanup (one UAC prompt): do the job, no window.
+    #[cfg(windows)]
+    if let Some(code) = pencleaner_core::windows::elevate::child_main() {
+        std::process::exit(code);
+    }
     pencleaner_lib::run()
 }

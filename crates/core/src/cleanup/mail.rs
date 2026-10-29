@@ -39,6 +39,7 @@ pub fn attachments(cx: &Cx) -> Vec<Group> {
             last_activity: mtime_of(&downloads),
             recommended: true,
             warning: None,
+            admin: false,
             action: Action::Paths(entries),
         });
     }
@@ -62,6 +63,7 @@ pub fn attachments(cx: &Cx) -> Vec<Group> {
                     last_activity: None,
                     recommended: false,
                     warning: Some("IMAP and Exchange attachments download again when you open the message. POP attachments are gone for good.".into()),
+                    admin: false,
                     action: Action::Paths(dirs),
                 });
             }

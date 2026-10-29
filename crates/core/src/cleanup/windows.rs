@@ -68,6 +68,7 @@ fn app_item(cx: &Cx, id: String, name: String, dirs: Vec<PathBuf>, running: bool
         // A running app holds its cache open: Windows won't let much of it go.
         recommended: !running,
         warning: running.then(|| "It's running; quit it first to free all of this.".to_owned()),
+        admin: false,
         action: Action::Paths(contents),
     })
 }
@@ -126,24 +127,21 @@ pub fn temporary(cx: &Cx) -> Vec<Group> {
 
 /// The Recycle Bin on every drive, as Windows itself counts it.
 pub fn recycle_bin(_cx: &Cx) -> Vec<Group> {
-    use windows_sys::Win32::UI::Shell::{SHQueryRecycleBinW, SHQUERYRBINFO};
-    let mut info = SHQUERYRBINFO { cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32, i64Size: 0, i64NumItems: 0 };
-    // A null root means "all drives".
-    let ok = unsafe { SHQueryRecycleBinW(std::ptr::null(), &mut info) } == 0;
+    let (bytes, n) = crate::windows::recycle_bin::size();
     let mut items = Vec::new();
-    if ok && info.i64Size as u64 >= MIN_ITEM {
-        let n = info.i64NumItems.max(0) as u64;
+    if bytes >= MIN_ITEM {
         items.push(Item {
             id: "recycle-bin".into(),
             name: "Recycle Bin".into(),
             detail: Some(if n == 1 { "1 item".into() } else { format!("{n} items") }),
             path: None,
-            size: info.i64Size as u64,
+            size: bytes,
             kind: ItemKind::Trash,
             mode: RemoveMode::Delete,
             last_activity: None,
             recommended: false,
             warning: Some("Emptying the Recycle Bin can't be undone.".into()),
+            admin: false,
             action: Action::Command(
                 ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"]
                     .map(String::from)
@@ -153,3 +151,155 @@ pub fn recycle_bin(_cx: &Cx) -> Vec<Group> {
     }
     vec![group("trash", Category::Trash, "Recycle Bin", "Everything you've deleted on this PC's drives.", items)]
 }
+
+/// One kind of system junk: folders whose contents go.
+struct Spot {
+    name: &'static str,
+    dirs: Vec<PathBuf>,
+    recommended: bool,
+    warning: Option<&'static str>,
+    /// Only items untouched for this long (seconds).
+    older: Option<i64>,
+}
+
+/// Windows' own leftovers in system folders. Deleting them needs administrator rights:
+/// one UAC prompt when you clean. Measuring some of them does too, so without it those
+/// are left out and the group says so.
+pub fn system_files(cx: &Cx) -> Vec<Group> {
+    let root = |var: &str| std::env::var_os(var).map(PathBuf::from);
+    let (Some(win), Some(data)) = (root("SystemRoot"), root("ProgramData")) else { return Vec::new() };
+    let elevated = crate::windows::elevate::is_elevated();
+    let mut items = Vec::new();
+    let mut unmeasured = 0;
+
+    let spots = [
+        Spot { name: "Windows Update downloads", dirs: vec![win.join(r"SoftwareDistribution\Download")], recommended: true, warning: None, older: None },
+        Spot {
+            name: "Delivery Optimization files",
+            dirs: vec![win.join(r"ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache")],
+            recommended: true,
+            warning: None,
+            older: None,
+        },
+        Spot { name: "Windows temporary files", dirs: vec![win.join("Temp")], recommended: true, warning: None, older: Some(3 * DAY) },
+        Spot {
+            name: "System error reports",
+            dirs: vec![data.join(r"Microsoft\Windows\WER\ReportQueue"), data.join(r"Microsoft\Windows\WER\ReportArchive")],
+            recommended: true,
+            warning: None,
+            older: None,
+        },
+        Spot {
+            name: "System crash dumps",
+            dirs: vec![win.join("Minidump")],
+            recommended: false,
+            warning: Some("Only useful if you're diagnosing crashes."),
+            older: None,
+        },
+    ];
+    for Spot { name, dirs, recommended, warning, older } in spots {
+        let present: Vec<&PathBuf> = dirs.iter().filter(|d| d.exists()).collect();
+        if present.is_empty() || cx.ctl.is_cancelled() {
+            continue;
+        }
+        if present.iter().any(|d| fs::read_dir(d).is_err()) {
+            unmeasured += 1;
+            continue;
+        }
+        let cutoff = older.map(|age| cx.now - age);
+        let paths: Vec<PathBuf> = present
+            .iter()
+            .flat_map(|d| children(d))
+            .filter(|p| cutoff.is_none_or(|c| mtime_of(p).is_some_and(|t| t < c)))
+            .collect();
+        let size: u64 = paths.iter().map(|p| fsutil::disk_usage(p)).sum();
+        cx.ctl.add(paths.len() as u64, size);
+        if size < MIN_ITEM {
+            continue;
+        }
+        items.push(Item {
+            id: present[0].to_string_lossy().into_owned(),
+            name: name.into(),
+            detail: Some(present[0].display().to_string()),
+            path: Some(present[0].to_string_lossy().into_owned()),
+            size,
+            kind: ItemKind::Folder,
+            mode: RemoveMode::Delete,
+            last_activity: present.iter().filter_map(|d| mtime_of(d)).max(),
+            recommended,
+            warning: warning.map(str::to_owned),
+            admin: true,
+            action: Action::Paths(paths),
+        });
+    }
+    // The full memory dump Windows writes after a blue screen: often gigabytes.
+    let dump = win.join("MEMORY.DMP");
+    if let Ok(md) = fs::metadata(&dump) {
+        items.push(Item {
+            id: dump.to_string_lossy().into_owned(),
+            name: "Full memory dump".into(),
+            detail: Some(dump.display().to_string()),
+            path: Some(dump.to_string_lossy().into_owned()),
+            size: fsutil::allocated(&md),
+            kind: ItemKind::File,
+            mode: RemoveMode::Delete,
+            last_activity: mtime(&md),
+            recommended: false,
+            warning: Some("Only useful if you're diagnosing a crash.".into()),
+            admin: true,
+            action: Action::Paths(vec![dump]),
+        });
+    }
+    let mut g = group(
+        "windows-system",
+        Category::System,
+        "Windows System Files",
+        "Update downloads, temporary files and crash reports Windows keeps. Cleaning asks for administrator access once.",
+        items,
+    );
+    g.guides = guides(&win);
+    if unmeasured > 0 && !elevated {
+        g.note = Some(format!(
+            "{unmeasured} more system {} can only be measured with administrator access. Run PenCleaner as administrator to include {}.",
+            if unmeasured == 1 { "folder" } else { "folders" },
+            if unmeasured == 1 { "it" } else { "them" }
+        ));
+    }
+    vec![g]
+}
+
+/// What only Windows' own Disk Cleanup removes properly: its files belong to the system
+/// (TrustedInstaller), so even an administrator's plain delete fails partway.
+fn guides(win: &Path) -> Vec<Guide> {
+    let mut out = Vec::new();
+    let drive = win.parent().unwrap_or(win);
+    let old = drive.join("Windows.old");
+    if old.exists() {
+        out.push(Guide {
+            id: "windows-old",
+            title: "Previous Windows installation (Windows.old)",
+            size: Some(fsutil::disk_usage(&old)).filter(|s| *s > 0),
+            why: "Kept after a Windows upgrade so you can go back. After removing it you can't roll back to the earlier version.",
+            steps: vec![
+                "Open Disk Cleanup and choose the system drive.",
+                "Click \u{201c}Clean up system files\u{201d} and approve the administrator prompt.",
+                "Tick \u{201c}Previous Windows installation(s)\u{201d}, then OK.",
+            ],
+            tool: Some(Tool::DiskCleanup),
+        });
+    }
+    out.push(Guide {
+        id: "component-store",
+        title: "Old Windows updates (component store)",
+        size: None,
+        why: "Windows keeps superseded system components after updates, often a few gigabytes in WinSxS. Only Windows can safely tell which ones are still needed.",
+        steps: vec![
+            "Open Disk Cleanup and choose the system drive.",
+            "Click \u{201c}Clean up system files\u{201d} and approve the administrator prompt.",
+            "Tick \u{201c}Windows Update Cleanup\u{201d}, then OK. It can take a few minutes.",
+        ],
+        tool: Some(Tool::DiskCleanup),
+    });
+    out
+}
+

@@ -80,6 +80,9 @@ pub struct Item {
     /// Pre-ticked in the review list.
     pub recommended: bool,
     pub warning: Option<String>,
+    /// Removing it needs administrator rights (Windows system folders): one UAC prompt
+    /// covers every such item in a clean.
+    pub admin: bool,
     #[serde(skip)]
     pub action: Action,
 }
@@ -95,6 +98,32 @@ pub struct Group {
     pub size: u64,
     /// Shown when the group couldn't be fully scanned.
     pub note: Option<String>,
+    /// Space PenCleaner can't safely free itself, with how to free it (Windows.old…).
+    pub guides: Vec<Guide>,
+}
+
+/// Something to clean by hand, with Windows' own tool: shown, never selected or removed.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Guide {
+    pub id: &'static str,
+    pub title: &'static str,
+    /// None when only the tool itself can measure it.
+    pub size: Option<u64>,
+    pub why: &'static str,
+    pub steps: Vec<&'static str>,
+    /// The button that opens the tool.
+    pub tool: Option<Tool>,
+}
+
+/// System tools a guide can open.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Tool {
+    /// Disk Cleanup (cleanmgr.exe), which can remove Windows.old and old updates.
+    DiskCleanup,
+    /// Settings → System → Storage.
+    StorageSettings,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -183,6 +212,7 @@ impl ItemSpec<'_> {
             mode: self.mode,
             recommended: self.recommended,
             warning: None,
+            admin: false,
             action: Action::Paths(vec![self.path.to_path_buf()]),
         })
     }
@@ -219,7 +249,7 @@ pub fn unreadable(dir: &Path) -> bool {
 }
 
 pub fn group(id: &'static str, category: Category, title: &'static str, description: &'static str, items: Vec<Item>) -> Group {
-    Group { id, category, title, description, items, size: 0, note: None }
+    Group { id, category, title, description, items, size: 0, note: None, guides: Vec::new() }
 }
 
 type Rule = fn(&Cx) -> Vec<Group>;
@@ -240,7 +270,7 @@ fn rules(category: Category) -> &'static [Rule] {
 #[cfg(windows)]
 fn rules(category: Category) -> &'static [Rule] {
     match category {
-        Category::System => &[windows::user_caches, windows::logs, windows::temporary],
+        Category::System => &[windows::user_caches, windows::logs, windows::temporary, windows::system_files],
         Category::Developer => &[dev::projects, dev::package_caches, dev::ide_caches],
         Category::Ai => &[ai::models, ai::tool_caches],
         Category::Mail => &[],
@@ -271,7 +301,7 @@ pub fn scan(categories: &[Category], ctl: &ScanControl) -> Report {
         g.items.sort_unstable_by_key(|i| std::cmp::Reverse(i.size));
         g.size = g.items.iter().map(|i| i.size).sum();
     }
-    groups.retain(|g| !g.items.is_empty() || g.note.is_some());
+    groups.retain(|g| !g.items.is_empty() || g.note.is_some() || !g.guides.is_empty());
 
     Report {
         groups,
@@ -316,7 +346,7 @@ impl Report {
             });
             g.size = g.items.iter().map(|i| i.size).sum();
         }
-        self.groups.retain(|g| !g.items.is_empty() || g.note.is_some());
+        self.groups.retain(|g| !g.items.is_empty() || g.note.is_some() || !g.guides.is_empty());
     }
 
     /// Removes the chosen items and drops them from the report.
@@ -328,16 +358,36 @@ impl Report {
             .flat_map(|g| g.items.iter().filter(|i| ids.contains(&i.id)).map(move |i| (g.category, i.clone())))
             .collect();
 
+        // Items that need administrator rights go to one elevated job, so a clean asks at
+        // most once (Windows only; nothing on the Mac is marked admin). Per path: the error.
+        let admin_paths: Vec<PathBuf> = chosen
+            .iter()
+            .filter(|(_, i)| i.admin)
+            .flat_map(|(_, i)| match &i.action {
+                Action::Paths(p) => p.clone(),
+                Action::Command(_) => Vec::new(),
+            })
+            .collect();
+        let elevated: Option<Result<HashMap<PathBuf, String>, String>> = (!admin_paths.is_empty()).then(|| run_elevated(admin_paths));
+
         let mut summary = CleanSummary::default();
         let total = chosen.len();
         for (index, (category, item)) in chosen.into_iter().enumerate() {
             on_event(CleanEvent::Started { id: item.id.clone(), name: item.name.clone(), size: item.size, index, total });
-            let result = match &item.action {
-                Action::Paths(paths) => {
+            let result = match (&item.action, item.admin, &elevated) {
+                (Action::Paths(paths), true, Some(Ok(failed))) => {
+                    let errors: Vec<&String> = paths.iter().filter_map(|p| failed.get(p)).collect();
+                    match errors.first() {
+                        None => Ok(()),
+                        Some(e) => Err(format!("{} of {} couldn't be removed: {e}", errors.len(), paths.len())),
+                    }
+                }
+                (_, true, Some(Err(e))) => Err(e.clone()),
+                (Action::Paths(paths), _, _) => {
                     let errors: Vec<String> = paths.iter().filter_map(|p| remover.remove(p, item.mode).err()).collect();
                     if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
                 }
-                Action::Command(argv) => run(argv),
+                (Action::Command(argv), _, _) => run(argv),
             };
             match result {
                 Ok(()) => {
@@ -362,9 +412,21 @@ impl Report {
     }
 }
 
+/// Deletes `paths` with administrator rights (one UAC prompt). Ok holds the paths that
+/// failed, with why.
+#[cfg(windows)]
+fn run_elevated(paths: Vec<PathBuf>) -> Result<HashMap<PathBuf, String>, String> {
+    crate::windows::elevate::run(&crate::windows::elevate::Job { paths }).map(|r| r.failed.into_iter().collect())
+}
+
+#[cfg(not(windows))]
+fn run_elevated(_paths: Vec<PathBuf>) -> Result<HashMap<PathBuf, String>, String> {
+    Err("Administrator cleanup is only used on Windows".into())
+}
+
 fn run(argv: &[String]) -> Result<(), String> {
     let (cmd, args) = argv.split_first().ok_or("empty command")?;
-    let out = Command::new(cmd).args(args).output().map_err(|e| e.to_string())?;
+    let out = fsutil::command(cmd).args(args).output().map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(())
     } else {
@@ -388,6 +450,7 @@ mod tests {
             last_activity: None,
             recommended: true,
             warning: None,
+            admin: false,
             action: Action::Paths(paths),
         }
     }

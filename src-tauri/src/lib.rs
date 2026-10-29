@@ -25,7 +25,18 @@ pub fn run() {
             let _ = pencleaner_core::protection::watch::repoint(&exe);
         }
     });
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // macOS brings a running app forward by itself; on Windows a second launch would start a
+    // second copy (and a second tray icon), so it hands over to this one instead.
+    #[cfg(windows)]
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|a| a == login::BACKGROUND_FLAG) {
+                menubar::show_main(app);
+            }
+        }))
+        .plugin(tauri_plugin_notification::init());
+    let builder = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
@@ -134,10 +145,8 @@ pub fn run() {
             commands::settings_save,
             commands::ignore_add,
             commands::ignore_remove,
-            #[cfg(target_os = "macos")]
             commands::vitals,
             commands::show_main,
-            #[cfg(target_os = "macos")]
             commands::empty_trash,
             #[cfg(target_os = "macos")]
             commands::trashed_app_remove,
@@ -146,6 +155,7 @@ pub fn run() {
             commands::login_item_status,
             commands::care_status,
             commands::care_done,
+            commands::open_system_tool,
             commands::login_item_set,
             commands::open_login_items_for_app,
         ])

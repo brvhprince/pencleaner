@@ -87,6 +87,8 @@ export interface CleanupItem {
   lastActivity: number | null;
   recommended: boolean;
   warning: string | null;
+  /** Needs administrator rights to remove (Windows system files): one UAC prompt per clean. */
+  admin: boolean;
 }
 
 export interface CleanupGroup {
@@ -97,6 +99,19 @@ export interface CleanupGroup {
   items: CleanupItem[];
   size: number;
   note: string | null;
+  /** Space only Windows' own tools free safely (Windows.old…), with how. */
+  guides: CleanupGuide[];
+}
+
+export type SystemTool = "diskCleanup" | "storageSettings";
+
+export interface CleanupGuide {
+  id: string;
+  title: string;
+  size: number | null;
+  why: string;
+  steps: string[];
+  tool: SystemTool | null;
 }
 
 export interface CleanupReport {
@@ -475,6 +490,7 @@ const tauriApi = {
   vitals: () => invoke<Vitals>("vitals"),
   showMain: (module?: string) => invoke<void>("show_main", { module }),
   emptyTrash: () => invoke<number>("empty_trash"),
+  openSystemTool: (tool: SystemTool) => invoke<void>("open_system_tool", { tool }),
   care: {
     status: () => invoke<CareStatus>("care_status"),
     done: () => invoke<void>("care_done"),
@@ -612,6 +628,7 @@ const mockApi: typeof tauriApi = {
   vitals: mock.vitals,
   showMain: async () => {},
   emptyTrash: async () => 2.4e9,
+  openSystemTool: async () => {},
   care: {
     status: async (): Promise<CareStatus> => ({ mode: "remind", everyDays: 7, lastRun: Date.now() / 1000 - 9 * 86400, nextDue: Date.now() / 1000 - 2 * 86400, due: location.hash.includes("caredue") }),
     done: async () => {},

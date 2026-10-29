@@ -28,3 +28,7 @@ libc = "0.2"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
+
+[target.'cfg(windows)'.dependencies]
+tauri-plugin-single-instance = "2"
+tauri-plugin-notification = "2"

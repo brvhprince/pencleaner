@@ -126,9 +126,10 @@ function mkGroup(id: string, category: Category, title: string, description: str
     lastActivity: null,
     recommended,
     warning: null,
+    admin: false,
     ...extra,
   }));
-  return { id, category, title, description, items, size: items.reduce((s, i) => s + i.size, 0), note };
+  return { id, category, title, description, items, size: items.reduce((s, i) => s + i.size, 0), note, guides: [] };
 }
 
 const project = (name: string, gb: number, ageDays: number, artifacts: string): MockItem => [
@@ -630,6 +631,52 @@ function buildReport(): CleanupReport {
       mkGroup("trash", "trash", "Trash Bins", "Everything in the Trash on this Mac and connected drives.", "trash", [
         ["Trash on WANPEN", 0.27, true, { detail: "1 item", warning: "Emptying the Trash can't be undone." }],
       ]),
+      // Windows preview only (#platform=windows): admin-only system files.
+      ...(location.hash.includes("platform=windows")
+        ? [
+            mkGroup(
+              "windows-system",
+              "system",
+              "Windows System Files",
+              "Update downloads, temporary files and crash reports Windows keeps. Cleaning asks for administrator access once.",
+              "folder",
+              [
+                ["Windows Update downloads", 3.4, true, { admin: true, detail: "C:\\Windows\\SoftwareDistribution\\Download" }],
+                ["System error reports", 0.21, true, { admin: true, detail: "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportQueue" }],
+                ["Full memory dump", 1.9, false, { admin: true, detail: "C:\\Windows\\MEMORY.DMP", warning: "Only useful if you're diagnosing a crash." }],
+              ],
+              "2 more system folders can only be measured with administrator access. Run PenCleaner as administrator to include them.",
+            ),
+          ].map((g) => ({
+            ...g,
+            guides: [
+              {
+                id: "windows-old",
+                title: "Previous Windows installation (Windows.old)",
+                size: 18.6 * GB,
+                why: "Kept after a Windows upgrade so you can go back. After removing it you can't roll back to the earlier version.",
+                steps: [
+                  "Open Disk Cleanup and choose the system drive.",
+                  "Click “Clean up system files” and approve the administrator prompt.",
+                  "Tick “Previous Windows installation(s)”, then OK.",
+                ],
+                tool: "diskCleanup" as const,
+              },
+              {
+                id: "component-store",
+                title: "Old Windows updates (component store)",
+                size: null,
+                why: "Windows keeps superseded system components after updates, often a few gigabytes in WinSxS. Only Windows can safely tell which ones are still needed.",
+                steps: [
+                  "Open Disk Cleanup and choose the system drive.",
+                  "Click “Clean up system files” and approve the administrator prompt.",
+                  "Tick “Windows Update Cleanup”, then OK. It can take a few minutes.",
+                ],
+                tool: "diskCleanup" as const,
+              },
+            ],
+          }))
+        : []),
     ],
   };
 }

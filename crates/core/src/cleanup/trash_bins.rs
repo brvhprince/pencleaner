@@ -18,6 +18,7 @@ fn bin(cx: &Cx, dir: &Path, name: String) -> Option<Item> {
         last_activity: mtime_of(dir),
         recommended: true,
         warning: Some("Emptying the Trash can't be undone.".into()),
+        admin: false,
         action: Action::Paths(entries),
     })
 }

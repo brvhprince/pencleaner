@@ -33,7 +33,8 @@ fn tick(app: &AppHandle) {
         Due::Nothing => {}
         Due::Remind => {
             let days = state.last_run.map_or(settings.care_every_days as i64, |l| (now() - l) / 86_400);
-            post_notification("Smart Care is due", &format!("It's been {days} days. Open PenCleaner from the menu bar to run it."));
+            let place = if cfg!(windows) { "the tray" } else { "the menu bar" };
+            post_notification(app, "Smart Care is due", &format!("It's been {days} days. Open PenCleaner from {place} to run it."));
             state.last_reminded = Some(now());
             care::save(&dir, &state);
         }
@@ -54,7 +55,7 @@ fn tick(app: &AppHandle) {
             care::save(&dir, &state);
             record(app, "smartcare", "Scheduled Smart Care", summary.bytes_freed, summary.cleaned.len(), Some("Caches, logs and temporary files".into()));
             if summary.bytes_freed > 0 {
-                post_notification("Smart Care ran", &format!("Freed {} of caches, logs and temporary files.", bytes_label(summary.bytes_freed)));
+                post_notification(app, "Smart Care ran", &format!("Freed {} of caches, logs and temporary files.", bytes_label(summary.bytes_freed)));
             }
         }
     }

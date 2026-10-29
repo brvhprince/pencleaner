@@ -6,7 +6,7 @@
   import ScanButton from "../lib/components/ScanButton.svelte";
   import Illustration from "../lib/illustrations/Illustration.svelte";
   import { bytes, plural } from "../lib/format";
-  import { MODULE } from "../lib/modules";
+  import { MACHINE, MODULE, available, pick } from "../lib/modules";
   import { app } from "../lib/state.svelte";
   import { apps } from "./applications/apps.svelte";
   import { cleanup } from "./cleanup/clean.svelte";
@@ -57,7 +57,7 @@
   <section class="center">
     <div class="drag" data-tauri-drag-region></div>
     <Illustration name={module.illustration} size={200} hero active />
-    <h2>{smart.phase === "scanning" ? "Checking your Mac…" : "Taking care of it…"}</h2>
+    <h2>{smart.phase === "scanning" ? `Checking your ${MACHINE}…` : "Taking care of it…"}</h2>
     <ul class="steps">
       {#each STEPS as s (s.id)}
         {@const Icon = ICON[s.id]}
@@ -77,12 +77,14 @@
     </div>
     <header>
       {#if smart.nothingToDo}
-        <h1>Your Mac is in good shape.</h1>
+        <h1>Your {MACHINE} is in good shape.</h1>
         <p class="muted">Nothing safe to clean or run right now.</p>
       {:else}
         <p class="eyebrow">Ready to run</p>
         <h1 class="tabular">{bytes(smart.total)}</h1>
-        <p class="muted">to free, plus {plural(smart.tasks.length, "maintenance task")}. Only safe, recommended items are included; review any of them first.</p>
+        <p class="muted">
+          to free{available("performance") ? `, plus ${plural(smart.tasks.length, "maintenance task")}` : ""}. Only safe, recommended items are included; review any of them first.
+        </p>
       {/if}
     </header>
     <div class="tiles">
@@ -93,6 +95,7 @@
         <p class="muted">{plural(smart.junk.length, "item")}: caches, logs, stale build output</p>
         <button class="btn" onclick={() => open("cleanup")}>Review</button>
       </div>
+      {#if available("performance")}
       <div class="tile glass">
         <span class="badge"><Zap size={16} /></span>
         <h3>Speed</h3>
@@ -100,6 +103,8 @@
         <p class="muted">{smart.tasks.map((t) => t.title).join(", ") || "Nothing needs doing"}</p>
         <button class="btn" onclick={() => open("performance")}>Review</button>
       </div>
+      {/if}
+      {#if available("applications")}
       <div class="tile glass">
         <span class="badge"><AppWindow size={16} /></span>
         <h3>App Leftovers</h3>
@@ -107,6 +112,7 @@
         <p class="muted">{plural(smart.leftovers.length, "removed app")} left files behind</p>
         <button class="btn" onclick={() => open("applications")}>Review</button>
       </div>
+      {/if}
       {#if volume}
         <div class="tile glass">
           <span class="badge"><HardDrive size={16} /></span>
@@ -126,7 +132,7 @@
     <Illustration name="achievements" size={150} hero />
     <p class="eyebrow">All done</p>
     <h1 class="tabular">{bytes(smart.freed)}</h1>
-    <p class="muted">freed{smart.freed ? " (moved items sit in the Trash until you empty it)" : ""}.</p>
+    <p class="muted">freed{smart.freed ? ` (moved items sit in the ${pick("Trash", "Recycle Bin")} until you empty it)` : ""}.</p>
     <ul class="steps">
       {#each STEPS as s (s.id)}
         {@const Icon = ICON[s.id]}

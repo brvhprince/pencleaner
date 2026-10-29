@@ -115,6 +115,7 @@ pub fn user_caches(cx: &Cx) -> Vec<Group> {
             last_activity: mtime_of(&caches),
             recommended: !running,
             warning: running.then(|| format!("{pretty} is running. Quit it first for a complete clean.")),
+            admin: false,
             action: Action::Paths(entries),
         });
     }
@@ -171,6 +172,7 @@ pub(super) fn old_temp_files(cx: &Cx) -> Option<Item> {
         last_activity: None,
         recommended: true,
         warning: None,
+        admin: false,
         action: Action::Paths(old),
     })
 }
@@ -193,6 +195,7 @@ pub fn temporary(cx: &Cx) -> Vec<Group> {
                 last_activity: None,
                 recommended: true,
                 warning: None,
+                admin: false,
                 action: Action::Paths(entries),
             });
         }

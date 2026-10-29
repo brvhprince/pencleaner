@@ -5,7 +5,9 @@
   import { api, inTauri, type ActivityEvent, type CareStatus, type TrashedApp, type Vitals } from "./lib/api";
   import { plural } from "./lib/format";
   import { ago, bytes } from "./lib/format";
-  import { available } from "./lib/modules";
+  import { MACHINE, available, pick } from "./lib/modules";
+
+  const BIN = pick("Trash", "Recycle Bin");
 
   let v = $state<Vitals | null>(null);
   let xprotect = $state<string | null>(null);
@@ -118,11 +120,11 @@
       return { icon: HardDrive, title: "Your disk is almost full", text: `Only ${bytes(v.diskFree)} left. Smart Care finds what's safe to remove.`, action: "Run Smart Care", run: () => api.showMain("smartcare") };
     }
     if (v && v.trash > 1e9) {
-      return { icon: Trash, title: `The Trash holds ${bytes(v.trash)}`, text: "Emptying it gives that space back.", action: confirmTrash ? `Empty ${bytes(v.trash)} for good?` : "Empty Trash", run: emptyTrash };
+      return { icon: Trash, title: `The ${BIN} holds ${bytes(v.trash)}`, text: "Emptying it gives that space back.", action: confirmTrash ? `Empty ${bytes(v.trash)} for good?` : `Empty ${BIN}`, run: emptyTrash };
     }
     const temp = v?.sensors?.cpuCelsius;
     if (temp != null && temp >= 90 && available("performance")) {
-      return { icon: Thermometer, title: "Your Mac is running hot", text: `The CPU is at ${Math.round(temp)} °C. See what's keeping it busy.`, action: "Open Performance", run: () => api.showMain("performance") };
+      return { icon: Thermometer, title: `Your ${MACHINE} is running hot`, text: `The CPU is at ${Math.round(temp)} °C. See what's keeping it busy.`, action: "Open Performance", run: () => api.showMain("performance") };
     }
     if (care?.due) {
       const since = care.lastRun ? `Last run ${ago(care.lastRun)}.` : `You asked for one every ${care.everyDays === 1 ? "day" : `${care.everyDays} days`}.`;
@@ -187,8 +189,8 @@
 <div class="pop">
   <header>
     <div>
-      <h1>Mac Health: <span class={v?.health ?? "good"}>{v ? healthWord[v.health] : "…"}</span></h1>
-      <p>{v?.model ?? "Mac"}</p>
+      <h1>{MACHINE} Health: <span class={v?.health ?? "good"}>{v ? healthWord[v.health] : "…"}</span></h1>
+      <p>{v?.model ?? MACHINE}</p>
     </div>
     <span class="mac"><Laptop size={30} strokeWidth={1.5} /></span>
   </header>
@@ -218,7 +220,7 @@
       <div class="card tile">
         <span class="t"><MemoryStick size={15} /> Memory</span>
         <span class="big" class:warn={v.memoryLevel !== "normal"}>{v.memoryPressure}%</span>
-        <span class="sub">pressure · {bytes(v.swapUsed)} swap</span>
+        <span class="sub">{pick("pressure", "in use")} · {bytes(v.swapUsed)} {pick("swap", "page file")}</span>
         <div class="bar"><div style:width="{v.memoryPressure}%" class:hot={v.memoryLevel !== "normal"}></div></div>
         {#if available("performance")}<button class="link" onclick={() => api.showMain("performance")}>Free Up</button>{/if}
       </div>
@@ -250,7 +252,7 @@
         <span class="speed"><ArrowDown size={12} /> {rate(v.netDown)}</span>
       </div>
       <div class="card tile">
-        <span class="t"><Trash size={15} /> Trash</span>
+        <span class="t"><Trash size={15} /> {BIN}</span>
         {#if v.trash && confirmTrash}
           <!-- The question needs more room than the corner link has. -->
           <span class="sub warn">{bytes(v.trash)}, can't be undone</span>

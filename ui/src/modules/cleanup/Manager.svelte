@@ -7,14 +7,19 @@
     File,
     Folder,
     FolderGit2,
+    ExternalLink,
     ScanSearch,
     Search,
+    ShieldUser,
     Smartphone,
     Trash,
     TriangleAlert,
+    Wrench,
   } from "@lucide/svelte";
   import type { Component } from "svelte";
   import { api, type CleanupItem, type ItemKind } from "../../lib/api";
+  import { pick } from "../../lib/modules";
+  import { app } from "../../lib/state.svelte";
   import Checkbox from "../../lib/components/Checkbox.svelte";
   import { ago, bytes, plural } from "../../lib/format";
   import { CATEGORIES, cleanup } from "./clean.svelte";
@@ -133,17 +138,38 @@
                 </span>
                 {#if item.warning}<span class="warn" title={item.warning}><TriangleAlert size={14} /></span>{/if}
                 {#if item.mode === "trash"}<span class="tag" title="Moved to the Trash instead of deleted">Trash</span>{/if}
+                {#if item.admin}<span class="tag admin" title="A Windows system folder: cleaning asks for administrator access once"><ShieldUser size={11} /> Needs admin</span>{/if}
                 <span class="age">{item.lastActivity ? ago(item.lastActivity) : ""}</span>
                 <span class="size tabular">{bytes(item.size)}</span>
               </div>
               {#if item.path}
-                <button class="reveal" title="Show in Finder" onclick={() => api.revealInFinder(item.path!)}><ScanSearch size={14} /></button>
+                <button class="reveal" title={pick("Show in Finder", "Show in Explorer")} onclick={() => api.revealInFinder(item.path!)}><ScanSearch size={14} /></button>
               {/if}
               <button class="reveal" title="Ignore: never show this again" onclick={() => cleanup.ignore(item)}><EyeOff size={14} /></button>
             </li>
           {:else}
-            <li class="empty">Nothing matches “{query}”.</li>
+            {#if query || !group.guides.length}<li class="empty">Nothing matches “{query}”.</li>{/if}
           {/each}
+          {#if !query}
+            {#each group.guides as gd (gd.id)}
+              <li class="guide">
+                <div class="gtop">
+                  <span class="gicon"><Wrench size={15} /></span>
+                  <strong>{gd.title}</strong>
+                  <span class="size tabular">{gd.size ? bytes(gd.size) : ""}</span>
+                </div>
+                <p>{gd.why} PenCleaner leaves this to Windows' own tool, which removes it properly:</p>
+                <ol>
+                  {#each gd.steps as step, i (i)}<li>{step}</li>{/each}
+                </ol>
+                {#if gd.tool}
+                  <button class="btn small" onclick={() => api.openSystemTool(gd.tool!).catch((e) => app.toast(String(e), "error"))}>
+                    {gd.tool === "diskCleanup" ? "Open Disk Cleanup" : "Open Storage Settings"} <ExternalLink size={11} />
+                  </button>
+                {/if}
+              </li>
+            {/each}
+          {/if}
         </ul>
       {/if}
     </section>

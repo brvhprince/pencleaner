@@ -303,6 +303,12 @@
     background: #eeeaf6;
     color: var(--m-muted);
   }
+  .manager .tag.admin {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+  }
 
 .manager .age {
     width: 92px;
@@ -378,3 +384,66 @@
     opacity: 0.4;
     box-shadow: none;
   }
+
+/* Cleanup guides: space only Windows' own tools free safely. */
+.manager li.guide {
+  display: block;
+  margin: 10px 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px dashed #d8d2e6;
+  background: #faf9fd;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--m-muted);
+}
+.manager li.guide .gtop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--m-text, #1d1b26);
+}
+.manager li.guide .gtop .size {
+  margin-left: auto;
+}
+.manager li.guide .gicon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: #eeeaf6;
+}
+.manager li.guide p {
+  margin: 6px 0 4px;
+}
+.manager li.guide ol {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  list-style: decimal;
+}
+/* Plain numbered lines, not list rows. */
+.manager li.guide ol li {
+  display: list-item;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-height: 0;
+  background: none;
+}
+.manager li.guide .btn.small {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 7px;
+  border: 1px solid #d8d2e6;
+  background: #fff;
+  color: var(--m-accent);
+}
+.manager li.guide .btn.small:hover {
+  background: #f3f0fa;
+}
+

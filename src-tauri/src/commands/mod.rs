@@ -69,7 +69,6 @@ pub struct AppState {
     protection: RwLock<Option<pencleaner_core::protection::ProtectionReport>>,
     #[cfg(target_os = "macos")]
     protection_ctl: Mutex<Option<Arc<ScanControl>>>,
-    #[cfg(target_os = "macos")]
     vitals: pencleaner_core::vitals::Sampler,
     #[cfg(target_os = "macos")]
     pub trashed: Mutex<Option<pencleaner_core::applications::TrashedApp>>,
@@ -126,7 +125,7 @@ pub fn about_info(app: AppHandle) -> AboutInfo {
     // "Microsoft Windows [Version 10.0.26100.2314]": the build number tells 10 from 11.
     #[cfg(windows)]
     let (macos, xprotect) = (
-        Command::new("cmd").args(["/C", "ver"]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default(),
+        fsutil::command("cmd").args(["/C", "ver"]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default(),
         None::<String>,
     );
     AboutInfo {
@@ -493,3 +492,59 @@ pub fn login_item_set(on: bool) -> CmdResult<crate::login::LoginStatus> {
 pub fn open_login_items_for_app() {
     crate::login::open_settings();
 }
+
+/// Live numbers for the menu bar popover (cheap; polled every couple of seconds).
+#[tauri::command]
+pub async fn vitals(app: AppHandle) -> CmdResult<pencleaner_core::vitals::Vitals> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().vitals.read()).await.map_err(|e| e.to_string())
+}
+
+/// Empties the Trash on the startup disk / the Recycle Bin (permanently). Returns the
+/// bytes freed.
+#[tauri::command]
+pub async fn empty_trash(app: AppHandle) -> CmdResult<u64> {
+    #[cfg(windows)]
+    return tauri::async_runtime::spawn_blocking(move || {
+        let freed = pencleaner_core::windows::recycle_bin::empty()?;
+        record(&app, "cleanup", "Emptied the Recycle Bin", freed, 1, None);
+        Ok(freed)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    tauri::async_runtime::spawn_blocking(move || {
+        let trash = fsutil::home_dir().join(".Trash");
+        let entries: Vec<PathBuf> = std::fs::read_dir(&trash).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).collect();
+        let items: Vec<RemoveItem> = entries.into_iter().map(|path| RemoveItem { path, size: None }).collect();
+        let summary = remove::remove_items(&items, RemoveMode::Delete, |_| {});
+        record(&app, "cleanup", "Emptied the Trash", summary.bytes_freed, summary.removed.len(), None);
+        if summary.failed.is_empty() { Ok(summary.bytes_freed) } else { Err(summary.failed[0].1.clone()) }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Opens a Windows cleanup tool a Cleanup guide points to (Disk Cleanup, Storage settings).
+#[tauri::command]
+pub fn open_system_tool(tool: pencleaner_core::cleanup::Tool) -> CmdResult<()> {
+    #[cfg(windows)]
+    {
+        use pencleaner_core::cleanup::Tool;
+        let mut cmd = match tool {
+            Tool::DiskCleanup => fsutil::command("cleanmgr.exe"),
+            Tool::StorageSettings => {
+                let mut c = fsutil::command("explorer.exe");
+                c.arg("ms-settings:storagesense");
+                c
+            }
+        };
+        cmd.spawn().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = tool;
+        Err("Only available on Windows".into())
+    }
+}
+

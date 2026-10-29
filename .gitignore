@@ -5,3 +5,5 @@ target/
 .idea/
 # Personal code-signing identity (certificate SHA-1); see scripts/release.sh
 .signing-identity
+# Illustrations the app doesn't use yet (kept locally; move one into vendor/ to use it)
+ui/src/lib/illustrations/unused/

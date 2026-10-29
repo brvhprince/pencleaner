@@ -354,27 +354,6 @@ pub fn watcher_clear_alerts() {
     watch::clear_alerts(&watch::data_dir());
 }
 
-/// Live numbers for the menu bar popover (cheap; polled every couple of seconds).
-#[tauri::command]
-pub async fn vitals(app: AppHandle) -> CmdResult<pencleaner_core::vitals::Vitals> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().vitals.read()).await.map_err(|e| e.to_string())
-}
-
-/// Empties the Trash on the startup disk (permanently). Returns the bytes freed.
-#[tauri::command]
-pub async fn empty_trash(app: AppHandle) -> CmdResult<u64> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let trash = fsutil::home_dir().join(".Trash");
-        let entries: Vec<PathBuf> = std::fs::read_dir(&trash).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).collect();
-        let items: Vec<RemoveItem> = entries.into_iter().map(|path| RemoveItem { path, size: None }).collect();
-        let summary = remove::remove_items(&items, RemoveMode::Delete, |_| {});
-        record(&app, "cleanup", "Emptied the Trash", summary.bytes_freed, summary.removed.len(), None);
-        if summary.failed.is_empty() { Ok(summary.bytes_freed) } else { Err(summary.failed[0].1.clone()) }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 /// Removes what the just-trashed app left behind (to the Trash).
 #[tauri::command]
 pub async fn trashed_app_remove(app: AppHandle) -> CmdResult<CleanSummary> {

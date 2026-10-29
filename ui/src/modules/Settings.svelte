@@ -4,7 +4,7 @@
   import { api, inTauri, type IgnoreRule, type LoginStatus } from "../lib/api";
   import Switch from "../lib/components/Switch.svelte";
   import { ago, plural } from "../lib/format";
-  import { MODULE, type ModuleId } from "../lib/modules";
+  import { MODULE, PLATFORM, available, pick, type ModuleId } from "../lib/modules";
   import { app } from "../lib/state.svelte";
   import { protection } from "./protection/protect.svelte";
 
@@ -87,11 +87,11 @@
           <span>
             <strong>Open PenCleaner at login</strong>
             {#if login && !login.available}
-              <em>Works in the installed app (macOS 13 or later)</em>
+              <em>{pick("Works in the installed app (macOS 13 or later)", "Works in the installed app")}</em>
             {:else if login?.needsApproval}
-              <em class="warn">Switched off in System Settings → Login Items</em>
+              <em class="warn">{pick("Switched off in System Settings → Login Items", "Switched off in Task Manager → Startup apps")}</em>
             {:else}
-              <em>Starts quietly in the menu bar, without its window</em>
+              <em>{pick("Starts quietly in the menu bar, without its window", "Starts quietly in the taskbar corner, without its window")}</em>
             {/if}
           </span>
           {#if login?.needsApproval}
@@ -104,9 +104,9 @@
           <span>
             <strong>Scheduled Smart Care</strong>
             {#if s.careMode === "clean"}
-              <em>Clears caches, logs and temp files on its own; never the Trash, projects or anything needing your password</em>
+              <em>Clears caches, logs and temp files on its own; never the {pick("Trash", "Recycle Bin")}, projects or anything needing your password</em>
             {:else if s.careMode === "remind"}
-              <em>A notification and a nudge in the menu bar when it's due</em>
+              <em>A notification and a nudge in the {pick("menu bar", "tray")} when it's due</em>
             {:else}
               <em>Runs while PenCleaner is open, so pair it with Open at Login</em>
             {/if}
@@ -150,6 +150,7 @@
             {#each LARGE as mb (mb)}<option value={mb}>{mb >= 1000 ? `${mb / 1000} GB` : `${mb} MB`}</option>{/each}
           </select>
         </label>
+        {#if available("applications")}
         <label class="row">
           <span>
             <strong>Call an app unused after</strong>
@@ -159,8 +160,10 @@
             {#each UNUSED as [d, label] (d)}<option value={d}>{label}</option>{/each}
           </select>
         </label>
+        {/if}
       </div>
 
+      {#if PLATFORM === "macos"}
       <div class="card glass">
         <h3><Globe size={15} /> Going online</h3>
         <div class="row">
@@ -178,7 +181,9 @@
           <Switch on={s.onlineNotarization} label="Online notarization check" onchange={(v) => app.saveSettings({ onlineNotarization: v })} />
         </div>
       </div>
+      {/if}
 
+      {#if PLATFORM === "macos"}
       <div class="card glass">
         <h3><Shield size={15} /> Protection</h3>
         <div class="row">
@@ -196,6 +201,7 @@
           <Switch on={s.offerTrashedAppCleanup} label="Clean up after trashed apps" onchange={(v) => app.saveSettings({ offerTrashedAppCleanup: v })} />
         </div>
       </div>
+      {/if}
     </div>
 
     <div class="card glass ignore">

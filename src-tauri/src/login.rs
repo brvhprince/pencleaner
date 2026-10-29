@@ -64,19 +64,58 @@ pub fn open_settings() {
     }
 }
 
-/// Open at Login on Windows (a Run registry entry) comes with the Windows work.
+/// Windows: the per-user startup list (HKCU\\…\\Run), which Task Manager's Startup apps
+/// tab shows and can switch off (recorded under StartupApproved).
+#[cfg(windows)]
+mod win {
+    use pencleaner_core::windows::registry::{self, CURRENT_USER};
+
+    pub const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    pub const APPROVED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+    pub const NAME: &str = "PenCleaner";
+
+    /// The command line this copy of PenCleaner would register.
+    pub fn command_line() -> Option<String> {
+        let exe = std::env::current_exe().ok()?;
+        Some(format!("\"{}\" {}", exe.display(), super::BACKGROUND_FLAG))
+    }
+
+    pub fn registered() -> Option<String> {
+        registry::get_string(CURRENT_USER, RUN, NAME)
+    }
+
+    /// Task Manager writes 12 bytes; an odd first byte means "Disabled".
+    pub fn disabled_in_task_manager() -> bool {
+        registry::get_binary(CURRENT_USER, APPROVED, NAME).and_then(|b| b.first().copied()).is_some_and(|b| b & 1 == 1)
+    }
+}
+
 #[cfg(windows)]
 pub fn status() -> LoginStatus {
-    LoginStatus { enabled: false, needs_approval: false, available: false }
+    let registered = win::registered().is_some();
+    let disabled = registered && win::disabled_in_task_manager();
+    LoginStatus { enabled: registered && !disabled, needs_approval: disabled, available: win::command_line().is_some() }
 }
 
 #[cfg(windows)]
-pub fn set(_on: bool) -> Result<LoginStatus, String> {
-    Err("Open at Login isn't available on Windows yet.".into())
+pub fn set(on: bool) -> Result<LoginStatus, String> {
+    use pencleaner_core::windows::registry::{self, CURRENT_USER};
+    if on {
+        let cmd = win::command_line().ok_or("Couldn't find PenCleaner's own program file.")?;
+        registry::set_string(CURRENT_USER, win::RUN, win::NAME, &cmd)?;
+    } else {
+        registry::delete(CURRENT_USER, win::RUN, win::NAME)?;
+        // Forget a "Disabled" mark too, so switching it on later just works.
+        registry::delete(CURRENT_USER, win::APPROVED, win::NAME)?;
+    }
+    Ok(status())
 }
 
+/// Task Manager's Startup apps tab, where a disabled entry is switched back on.
 #[cfg(windows)]
-pub fn open_settings() {}
+pub fn open_settings() {
+    let _ = pencleaner_core::fsutil::command("taskmgr").arg("/7").arg("/startup").spawn();
+}
 
 /// launchd starts the agent right after registering; if PenCleaner is already open (it
 /// is: the user just flipped the switch), that background copy must bow out. Holds an

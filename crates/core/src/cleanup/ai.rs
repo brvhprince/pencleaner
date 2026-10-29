@@ -84,6 +84,7 @@ fn ollama(cx: &Cx) -> Vec<Item> {
                 last_activity: mtime_of(&manifest),
                 recommended: false,
                 warning: (shared > 0).then(|| format!("Shares {} MB with other models; that part stays.", shared / 1_000_000)),
+                admin: false,
                 action: Action::Paths(paths),
             })
         })

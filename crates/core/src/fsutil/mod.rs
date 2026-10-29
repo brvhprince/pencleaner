@@ -15,13 +15,27 @@ mod windows;
 #[cfg(windows)]
 pub use windows::*;
 
+/// A `Command` that, on Windows, doesn't flash a console window: PenCleaner is a GUI app,
+/// and starting `tasklist` or `powershell` would otherwise pop one up for a moment.
+pub fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut c = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
+
 /// Runs a command with a deadline; a hung system tool (sfltool sometimes is) is killed
 /// instead of freezing a scan. Returns stdout, or None on timeout, failure to start, or
 /// a non-zero exit.
 pub fn run_with_timeout(cmd: &str, args: &[&str], limit: std::time::Duration) -> Option<String> {
     use std::io::Read;
-    use std::process::{Command, Stdio};
-    let mut child = Command::new(cmd).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    use std::process::Stdio;
+    let mut child = command(cmd).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
     let mut stdout = child.stdout.take()?;
     // Drain on another thread so a chatty child can't block on a full pipe.
     let reader = std::thread::spawn(move || {

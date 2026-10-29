@@ -27,6 +27,45 @@ const WIN_SYSTEM_TREES: &[&str] = &[
     "Windows", "Program Files", "Program Files (x86)", "ProgramData", "Recovery", "System Volume Information", "$Recycle.Bin", "Boot",
 ];
 
+/// Windows system junk whose *contents* may be removed (with administrator rights), the
+/// exceptions inside `WIN_SYSTEM_TREES`. Relative to %SystemRoot% or %ProgramData%.
+#[cfg(windows)]
+const WIN_ADMIN_TREES: &[(&str, &str)] = &[
+    ("SystemRoot", r"SoftwareDistribution\Download"),
+    ("SystemRoot", r"ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache"),
+    ("SystemRoot", "Temp"),
+    ("SystemRoot", "Minidump"),
+    ("ProgramData", r"Microsoft\Windows\WER\ReportQueue"),
+    ("ProgramData", r"Microsoft\Windows\WER\ReportArchive"),
+];
+
+/// Single system files that may be removed with administrator rights.
+#[cfg(windows)]
+const WIN_ADMIN_FILES: &[(&str, &str)] = &[("SystemRoot", "MEMORY.DMP")];
+
+#[cfg(windows)]
+fn lower(p: &Path) -> String {
+    p.to_string_lossy().to_lowercase().replace('/', "\\").trim_end_matches('\\').to_owned()
+}
+
+#[cfg(windows)]
+fn env_path(var: &str, rel: &str) -> Option<String> {
+    std::env::var_os(var).map(|base| lower(&Path::new(&base).join(rel)))
+}
+
+/// Inside one of the system junk folders (not the folder itself), or one of the single
+/// system files: the only system paths an elevated clean may touch.
+#[cfg(windows)]
+pub fn admin_cleanable(path: &Path) -> bool {
+    // Text comparison below: "Temp\..\System32" would otherwise start with "Temp".
+    if basics(path).is_some() {
+        return false;
+    }
+    let p = lower(path);
+    WIN_ADMIN_TREES.iter().filter_map(|(v, r)| env_path(v, r)).any(|t| p.starts_with(&format!("{t}\\")))
+        || WIN_ADMIN_FILES.iter().filter_map(|(v, r)| env_path(v, r)).any(|f| p == f)
+}
+
 /// Windows rules: system folders, every profile, and the profile's own skeleton. Paths
 /// compare case-insensitively, as Windows does.
 #[cfg(windows)]
@@ -34,7 +73,9 @@ pub fn protection(path: &Path, home: &Path) -> Option<&'static str> {
     if let Some(why) = basics(path) {
         return Some(why);
     }
-    let lower = |p: &Path| p.to_string_lossy().to_lowercase().replace('/', "\\");
+    if admin_cleanable(path) {
+        return None;
+    }
     let (p, h) = (lower(path), lower(home));
     let parts: Vec<&str> = p.trim_end_matches('\\').split('\\').collect();
     // ["c:", "windows", …]: a drive root, or anything directly on it, is off limits.
@@ -222,6 +263,38 @@ mod tests {
             r"D:\Games\old-mod",
         ] {
             assert!(protection(p(ok), home).is_none(), "{ok} should be removable");
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_admin_cleanup_is_narrow() {
+        let win = std::env::var("SystemRoot").expect("SystemRoot");
+        let data = std::env::var("ProgramData").expect("ProgramData");
+        let at = |base: &str, rel: &str| std::path::PathBuf::from(format!(r"{base}\{rel}"));
+        // Contents of the junk folders, and the memory dump: yes.
+        for ok in [
+            at(&win, r"SoftwareDistribution\Download\a1b2c3"),
+            at(&win, r"Temp\setup.log"),
+            at(&win, r"Minidump\102826-1.dmp"),
+            at(&win, "MEMORY.DMP"),
+            at(&data, r"Microsoft\Windows\WER\ReportArchive\Kernel_1"),
+        ] {
+            assert!(admin_cleanable(&ok), "{} should be cleanable", ok.display());
+            assert!(protection(&ok, p(r"C:\Users\me")).is_none(), "{} should pass the gate", ok.display());
+        }
+        // The folders themselves, and anything else in Windows: no.
+        for bad in [
+            at(&win, r"SoftwareDistribution\Download"),
+            at(&win, "Temp"),
+            at(&win, r"System32\drivers\etc\hosts"),
+            at(&win, r"SoftwareDistribution\DataStore\DataStore.edb"),
+            at(&win, r"Temp\..\System32"),
+            at(&data, r"Microsoft\Windows\WER"),
+            p(r"C:\Program Files\App\cache").to_path_buf(),
+        ] {
+            assert!(!admin_cleanable(&bad), "{} must not be cleanable", bad.display());
+            assert!(protection(&bad, p(r"C:\Users\me")).is_some(), "{} must stay protected", bad.display());
         }
     }
 }
