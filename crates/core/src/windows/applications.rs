@@ -79,6 +79,9 @@ fn programs() -> Vec<Program> {
             if get("ReleaseType").is_some_and(|t| t.contains("Update") || t.contains("Hotfix")) {
                 continue;
             }
+            if hidden(&name, get("InstallLocation").as_deref()) {
+                continue;
+            }
             let version = get("DisplayVersion");
             // The same program can appear in two lists (32- and 64-bit parts).
             if !seen.insert((name.to_lowercase(), version.clone())) {
@@ -185,23 +188,61 @@ fn related_for(p: &Program, folders: &[Folder]) -> Vec<RelatedFile> {
     files
 }
 
-/// Executable names of running programs, lower-case ("slack.exe").
-fn running_exes() -> HashSet<String> {
-    crate::apps::running_bundle_ids()
+/// Programs the list leaves out: PenCleaner itself, and Microsoft Edge with its WebView2
+/// runtime and updater, whose uninstallers Windows makes refuse (outside the EU), like
+/// Apple's own apps on the Mac.
+fn hidden(name: &str, location: Option<&str>) -> bool {
+    let me = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_string_lossy().to_lowercase()));
+    let at_me = location.is_some_and(|l| me.as_deref() == Some(l.trim_matches('"').trim_end_matches('\\').to_lowercase().as_str()));
+    at_me || name.eq_ignore_ascii_case("PenCleaner") || name.starts_with("Microsoft Edge")
 }
 
-/// A program counts as running if an .exe directly in its folder is.
-fn is_running(p: &Program, running: &HashSet<String>) -> bool {
+/// Full paths of running programs, lower-case. Some system processes can't be asked
+/// without administrator rights; those are simply missing, which only means a "Running"
+/// tag might not show.
+fn running_paths() -> Vec<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::ProcessStatus::K32EnumProcesses;
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+    let mut pids = vec![0u32; 4096];
+    let mut used = 0u32;
+    if unsafe { K32EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut used) } == 0 {
+        return Vec::new();
+    }
+    pids.truncate(used as usize / 4);
+    let mut out = Vec::new();
+    let mut buf = [0u16; 1024];
+    for pid in pids.into_iter().filter(|p| *p > 4) {
+        let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if h.is_null() {
+            continue;
+        }
+        let mut len = buf.len() as u32;
+        if unsafe { QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len) } != 0 {
+            out.push(String::from_utf16_lossy(&buf[..len as usize]).to_lowercase());
+        }
+        unsafe { CloseHandle(h) };
+    }
+    out
+}
+
+/// Executable names of running programs ("slack.exe"), for the leftovers check.
+fn running_names(paths: &[String]) -> HashSet<String> {
+    paths.iter().filter_map(|p| p.rsplit('\\').next().map(str::to_owned)).collect()
+}
+
+/// A program is running if a process runs from inside its own folder (by full path: a
+/// shared name like node.exe says nothing).
+fn is_running(p: &Program, running: &[String]) -> bool {
     let Some(loc) = &p.location else { return false };
-    fs::read_dir(loc).into_iter().flatten().flatten().any(|e| {
-        let n = e.file_name().to_string_lossy().to_lowercase();
-        n.ends_with(".exe") && running.contains(&n)
-    })
+    let dir = format!("{}\\", loc.to_string_lossy().trim_end_matches('\\').to_lowercase());
+    running.iter().any(|r| r.starts_with(&dir))
 }
 
 /// Data folders of programs that are no longer installed: untouched for 6+ months, not
 /// matching anything installed or running, and never Windows' or a tool's own.
 fn leftovers(programs: &[Program], folders: &[Folder], claimed: &HashSet<PathBuf>, running: &HashSet<String>) -> Vec<Leftover> {
+    // `running`: executable names, e.g. "slack.exe".
     let names: HashSet<String> = programs.iter().map(|p| normalize(&p.name)).collect();
     let publishers: HashSet<String> = programs.iter().filter_map(|p| p.publisher.as_deref().map(normalize_publisher)).collect();
     let running_names: HashSet<String> = running.iter().map(|e| normalize(e.trim_end_matches(".exe"))).collect();
@@ -303,7 +344,7 @@ pub fn scan(ctl: &ScanControl) -> AppsReport {
     let started = Instant::now();
     let programs = programs();
     let folders = data_folders();
-    let running = running_exes();
+    let running = running_paths();
 
     let apps: Vec<AppEntry> = programs
         .par_iter()
@@ -335,7 +376,7 @@ pub fn scan(ctl: &ScanControl) -> AppsReport {
         })
         .collect();
     let claimed: HashSet<PathBuf> = apps.iter().flat_map(|a| a.related.iter().map(|f| PathBuf::from(&f.path))).collect();
-    let leftovers = if ctl.is_cancelled() { Vec::new() } else { leftovers(&programs, &folders, &claimed, &running) };
+    let leftovers = if ctl.is_cancelled() { Vec::new() } else { leftovers(&programs, &folders, &claimed, &running_names(&running)) };
     let installers = if ctl.is_cancelled() { Vec::new() } else { installers(&home_dir(), &apps, ctl) };
     let mut apps = apps;
     apps.sort_by_key(|a| std::cmp::Reverse(a.size + a.related_size));
@@ -393,6 +434,23 @@ fn uninstall(p: &Program) -> Result<(), String> {
     Ok(())
 }
 
+/// Moves a data folder to the Recycle Bin, retrying for a few seconds: right after an
+/// uninstaller finishes, its files are often still held open briefly.
+fn move_data(remover: &Remover, path: &Path) -> Result<(), String> {
+    let mut last = String::new();
+    for attempt in 0..4 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        match remover.remove(path, RemoveMode::Trash) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = e,
+        }
+    }
+    let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    Err(format!("its data folder \u{201c}{name}\u{201d} couldn't go to the Recycle Bin: {last}"))
+}
+
 impl AppsReport {
     /// Uninstalls programs (their own uninstallers, then their AppData to the Recycle
     /// Bin) and moves leftovers and installers to the Recycle Bin.
@@ -401,21 +459,21 @@ impl AppsReport {
         let mut summary = CleanSummary::default();
         let total = targets.len();
         let programs = programs();
-        let running = running_exes();
         for (index, t) in targets.iter().enumerate() {
             let (id, size, result) = match t {
                 Target::App(id) => {
                     let Some(a) = self.apps.iter().find(|a| &a.id == id) else { continue };
                     on_event(CleanEvent::Started { id: a.id.clone(), name: a.name.clone(), size: a.size + a.related_size, index, total });
+                    // Running is fine here: unlike quitting a Mac app, a background service can't
+                    // just be closed, and an uninstaller handles its own program.
                     let result = match root_of(id).and_then(|(root, key)| programs.iter().find(|p| p.root == root && p.key == key)) {
                         None => Err(format!("{} is no longer in the installed programs list. Scan again.", a.name)),
-                        Some(p) if is_running(p, &running) => Err(format!("{} is running. Quit it, then try again.", a.name)),
                         Some(p) => uninstall(p).and_then(|()| {
                             // Its data, now that the program itself is gone.
-                            let errors: Vec<String> = a.related.iter().filter_map(|f| remover.remove(Path::new(&f.path), RemoveMode::Trash).err()).collect();
+                            let errors: Vec<String> = a.related.iter().filter_map(|f| move_data(&remover, Path::new(&f.path)).err()).collect();
                             match errors.first() {
                                 None => Ok(()),
-                                Some(e) => Err(format!("Uninstalled, but some of its data couldn't be moved: {e}")),
+                                Some(e) => Err(format!("Uninstalled, but {e}")),
                             }
                         }),
                     };
@@ -424,7 +482,7 @@ impl AppsReport {
                 Target::Leftover(id) => {
                     let Some(l) = self.leftovers.iter().find(|l| &l.id == id) else { continue };
                     on_event(CleanEvent::Started { id: l.id.clone(), name: l.id.clone(), size: l.size, index, total });
-                    let errors: Vec<String> = l.files.iter().filter_map(|f| remover.remove(Path::new(&f.path), RemoveMode::Trash).err()).collect();
+                    let errors: Vec<String> = l.files.iter().filter_map(|f| move_data(&remover, Path::new(&f.path)).err()).collect();
                     (l.id.clone(), l.size, errors.first().map_or(Ok(()), |e| Err(e.clone())))
                 }
                 Target::Installer(path) => {

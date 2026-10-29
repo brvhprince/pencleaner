@@ -48,7 +48,11 @@
         </p>
       {/if}
       {#if running.length}
-        <p class="warn"><TriangleAlert size={14} /> {running.map((r) => r.name).join(", ")} {running.length === 1 ? "is" : "are"} running and will be skipped. Quit {running.length === 1 ? "it" : "them"} first to uninstall.</p>
+        {#if PLATFORM === "windows"}
+          <p class="warn"><TriangleAlert size={14} /> {running.map((r) => r.name).join(", ")} {running.length === 1 ? "is" : "are"} running. {running.length === 1 ? "Its" : "Their"} uninstaller may ask you to close {running.length === 1 ? "it" : "them"} first.</p>
+        {:else}
+          <p class="warn"><TriangleAlert size={14} /> {running.map((r) => r.name).join(", ")} {running.length === 1 ? "is" : "are"} running and will be skipped. Quit {running.length === 1 ? "it" : "them"} first to uninstall.</p>
+        {/if}
       {/if}
       {#if needsPassword && PLATFORM === "macos"}
         <p class="note"><Lock size={13} /> Some items were installed for all users. macOS will ask for your password once.</p>
